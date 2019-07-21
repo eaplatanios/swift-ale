@@ -1,0 +1,5 @@
+module CArcadeLearningEnvironment [system] {
+  header "ale.h"
+  link "ale_c"
+  export *
+}
