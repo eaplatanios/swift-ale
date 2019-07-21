@@ -17,9 +17,13 @@ import TensorFlow
 
 public final class ArcadeEmulator {
   @usableFromInline internal var handle: UnsafeMutablePointer<ALEInterface?>?
+  @usableFromInline static internal var defaultLoggingMode: LoggingMode? = nil
 
   @inlinable
   public init() {
+    if ArcadeEmulator.defaultLoggingMode == nil {
+      ArcadeEmulator.setLoggingMode(.error)
+    }
     self.handle = ALE_new()
   }
 
@@ -208,15 +212,21 @@ public final class ArcadeEmulator {
   public func loadState() {
     CArcadeLearningEnvironment.loadState(handle)
   }
-
-  /// Sets the logging mode for this emulator.
-  @inlinable
-  public func setLoggingMode(_ mode: LoggingMode) {
-    setLoggerMode(mode.rawValue)
-  }
 }
 
 extension ArcadeEmulator {
+  /// Sets the logging mode for this emulator.
+  @inlinable
+  public static func setLoggingMode(_ mode: LoggingMode) {
+    ArcadeEmulator.defaultLoggingMode = mode
+    setLoggerMode(mode.rawValue)
+  }
+
+  /// Logging mode for emulators.
+  public enum LoggingMode: Int32 {
+    case info = 0, warning, error
+  }
+
   /// Emulator state.
   public final class State {
     @usableFromInline internal var handle: UnsafeMutablePointer<ALEState?>?
@@ -280,9 +290,72 @@ extension ArcadeEmulator {
       }
     }
   }
+}
 
-  /// Logging mode for emulators.
-  public enum LoggingMode: Int32 {
-    case info = 0, warning, error
+extension ArcadeEmulator {
+  public enum Games: String, CaseIterable {
+    case adventure = "adventure"
+    case airRaid = "air_raid"
+    case alien = "alien"
+    case amidar = "amidar"
+    case assault = "assault"
+    case asterix = "asterix"
+    case asteroids = "asteroids"
+    case atlantis = "atlantis"
+    case bankHeist = "bank_heist"
+    case battleZone = "battle_zone"
+    case beamRider = "beam_rider"
+    case berzerk = "berzerk"
+    case bowling = "bowling"
+    case boxing = "boxing"
+    case breakout = "breakout"
+    case carnival = "carnival"
+    case centipede = "centipede"
+    case chopperCommand = "chopper_command"
+    case crazyClimber = "crazy_climber"
+    case defender = "defender"
+    case demonAttack = "demon_attack"
+    case doubleDunk = "double_dunk"
+    case elevatorAction = "elevator_action"
+    case enduro = "enduro"
+    case fishingDerby = "fishing_derby"
+    case freeway = "freeway"
+    case frostbite = "frostbite"
+    case gopher = "gopher"
+    case gravitar = "gravitar"
+    case hero = "hero"
+    case iceHockey = "ice_hockey"
+    case jamesBond = "jamesbond"
+    case journeyEscape = "journey_escape"
+    case kaboom = "kaboom"
+    case kangaroo = "kangaroo"
+    case krull = "krull"
+    case kungFuMaster = "kung_fu_master"
+    case montezumaRevenge = "montezuma_revenge"
+    case msPacman = "ms_pacman"
+    case nameThisGame = "name_this_game"
+    case phoenix = "phoenix"
+    case pitfall = "pitfall"
+    case pong = "pong"
+    case pooyan = "pooyan"
+    case privateEye = "private_eye"
+    case qbert = "qbert"
+    case riverRaid = "riverraid"
+    case roadRunner = "road_runner"
+    case robotank = "robotank"
+    case seaquest = "seaquest"
+    case skiing = "skiing"
+    case solaris = "solaris"
+    case spaceInvaders = "space_invaders"
+    case starGunner = "star_gunner"
+    case tennis = "tennis"
+    case timePilot = "time_pilot"
+    case tutankham = "tutankham"
+    case upNDown = "up_n_down"
+    case venture = "venture"
+    case videoPinball = "video_pinball"
+    case wizardOfWor = "wizard_of_wor"
+    case yarsRevenge = "yars_revenge"
+    case zaxxon = "zaxxon"
   }
 }
