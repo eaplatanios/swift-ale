@@ -1,0 +1,43 @@
+{
+  "object": {
+    "pins": [
+      {
+        "package": "Gzip",
+        "repositoryURL": "https://github.com/1024jp/GzipSwift.git",
+        "state": {
+          "branch": null,
+          "revision": "eac1da34ec837f501b56d810bdf0fd68b3f91e19",
+          "version": "4.1.0"
+        }
+      },
+      {
+        "package": "NELFramework",
+        "repositoryURL": "https://github.com/eaplatanios/nel_framework.git",
+        "state": {
+          "branch": "master",
+          "revision": "5f86d14ba58bb750f3ef5bba5b89d3c0292f985a",
+          "version": null
+        }
+      },
+      {
+        "package": "Retro",
+        "repositoryURL": "https://github.com/eaplatanios/retro-swift.git",
+        "state": {
+          "branch": "master",
+          "revision": "b68ac1ecd759c33d0d5ece76d5e2620801403c16",
+          "version": null
+        }
+      },
+      {
+        "package": "ZIPFoundation",
+        "repositoryURL": "https://github.com/weichsel/ZIPFoundation.git",
+        "state": {
+          "branch": "master",
+          "revision": "edbeaa39b426e54702194b0a601342322f01e400",
+          "version": null
+        }
+      }
+    ]
+  },
+  "version": 1
+}

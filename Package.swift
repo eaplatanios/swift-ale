@@ -6,6 +6,7 @@ import PackageDescription
 
 let package = Package(
   name: "ArcadeLearningEnvironment",
+  platforms: [.macOS(.v10_12)],
   products: [
     .library(
       name: "ArcadeLearningEnvironment",
@@ -14,6 +15,9 @@ let package = Package(
       name: "ArcadeLearningEnvironmentExperiments",
       targets: ["ArcadeLearningEnvironmentExperiments"]),
   ],
+  dependencies: [
+    .package(url: "https://github.com/eaplatanios/retro-swift.git", .branch("master")),
+  ],
   targets: [
     .systemLibrary(
       name: "CArcadeLearningEnvironment",
@@ -21,7 +25,7 @@ let package = Package(
       pkgConfig: "ale"),
     .target(
       name: "ArcadeLearningEnvironment",
-      dependencies: ["CArcadeLearningEnvironment"],
+      dependencies: ["CArcadeLearningEnvironment", "ReinforcementLearning"],
       path: "Sources/ArcadeLearningEnvironment"),
     .target(
       name: "ArcadeLearningEnvironmentExperiments",

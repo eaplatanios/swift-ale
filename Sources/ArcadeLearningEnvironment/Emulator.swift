@@ -22,13 +22,13 @@ public final class ArcadeEmulator {
 
   public let gameROMsPath: URL
   public let repeatActionProbability: Float
-  public let randomSeed: Int?
+  public let randomSeed: TensorFlowSeed?
 
   @inlinable
   public init(
     gameROMsPath: URL? = nil,
     repeatActionProbability: Float = 0.0,
-    randomSeed: Int? = nil
+    randomSeed: TensorFlowSeed? = nil
   ) {
     if ArcadeEmulator.defaultLoggingMode == nil { ArcadeEmulator.setLoggingMode(.error) }
     self.handle = ALE_new()
@@ -38,8 +38,16 @@ public final class ArcadeEmulator {
       .appendingPathComponent("roms")
     self.repeatActionProbability = repeatActionProbability
     self.randomSeed = randomSeed
-    if let r = randomSeed { self["random_seed"] = r }
+    if let r = randomSeed { self["random_seed"] = Int(r.graph + r.op) }
     self["repeat_action_probability"] = repeatActionProbability
+  }
+
+  @inlinable
+  public convenience init(copying emulator: ArcadeEmulator) {
+    self.init(
+      gameROMsPath: emulator.gameROMsPath,
+      repeatActionProbability: emulator.repeatActionProbability,
+      randomSeed: emulator.randomSeed)
   }
 
   @inlinable
