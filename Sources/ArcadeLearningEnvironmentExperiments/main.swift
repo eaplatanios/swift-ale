@@ -22,7 +22,7 @@ struct ArcadeActorCritic: Network {
   public var conv1: Conv2D<Float> = Conv2D<Float>(filterShape: (8, 8, 1, 4), strides: (4, 4))
   public var conv2: Conv2D<Float> = Conv2D<Float>(filterShape: (4, 4, 4, 4), strides: (2, 2))
   public var denseHidden: Dense<Float> = Dense<Float>(inputSize: 324, outputSize: 32)
-  public var denseAction: Dense<Float> = Dense<Float>(inputSize: 32, outputSize: 3) // TODO: Easy way to get the number of actions.
+  public var denseAction: Dense<Float> = Dense<Float>(inputSize: 32, outputSize: 4) // TODO: Easy way to get the number of actions.
   public var denseValue: Dense<Float> = Dense<Float>(inputSize: 32, outputSize: 1)
 
   public init() {}

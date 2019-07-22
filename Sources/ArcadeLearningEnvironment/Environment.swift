@@ -28,12 +28,14 @@ public struct ArcadeEnvironment: Environment {
   public let batchSize: Int
   public let emulators: [ArcadeEmulator]
   public let useMinimalActionSet: Bool
+  public let finishEpisodeOnLostLife: Bool
   public let frameSkip: FrameSkip
   public let actionSpace: Discrete
   public let observationsType: ArcadeObservationsType
   public let observationSpace: DiscreteBox<UInt8>
 
   @usableFromInline internal let actionSet: [ArcadeEmulator.Action]
+  @usableFromInline internal var startingLives: [Int]
   @usableFromInline internal var needsReset: [Bool]
   @usableFromInline internal var rngs: [PhiloxRandomNumberGenerator]
   @usableFromInline internal var step: Step<Tensor<UInt8>, Tensor<Float>>? = nil
@@ -45,24 +47,29 @@ public struct ArcadeEnvironment: Environment {
     using emulator: ArcadeEmulator,
     observationsType: ArcadeObservationsType = .screen(height: 84, width: 84, format: .grayscale),
     useMinimalActionSet: Bool = true,
+    finishEpisodeOnLostLife: Bool = true,
     frameSkip: FrameSkip = .stochastic(minCount: 2, maxCount: 5)
   ) {
     self.init(
       using: [emulator],
       observationsType: observationsType,
-      useMinimalActionSet: useMinimalActionSet)
+      useMinimalActionSet: useMinimalActionSet,
+      finishEpisodeOnLostLife: finishEpisodeOnLostLife,
+      frameSkip: frameSkip)
   }
 
   public init(
     using emulators: [ArcadeEmulator],
     observationsType: ArcadeObservationsType = .screen(height: 84, width: 84, format: .grayscale),
     useMinimalActionSet: Bool = true,
+    finishEpisodeOnLostLife: Bool = true,
     frameSkip: FrameSkip = .stochastic(minCount: 2, maxCount: 5)
   ) {
     precondition(emulators.count > 0, "At least one emulator must be provided.")
     self.batchSize = emulators.count
     self.emulators = emulators
     self.useMinimalActionSet = useMinimalActionSet
+    self.finishEpisodeOnLostLife = finishEpisodeOnLostLife
     self.frameSkip = frameSkip
     self.actionSet = useMinimalActionSet ?
         emulators[0].minimalActions() :
@@ -81,6 +88,7 @@ public struct ArcadeEnvironment: Environment {
         lowerBound: 0,
         upperBound: 255)
     }
+    self.startingLives = emulators.map { $0.lives() }
     self.needsReset = [Bool](repeating: true, count: batchSize)
     self.rngs = (0..<batchSize).map { _ in
       let seed = Context.local.randomSeed
@@ -128,8 +136,10 @@ public struct ArcadeEnvironment: Environment {
     let action = actionSet[Int(action.scalarized())]
     var reward = Float(0.0)
     let stepCount = frameSkip.count(rng: &rngs[batchIndex])
-    for _ in 0..<stepCount { reward += Float(emulators[batchIndex].act(using: action)) }   
-    let finished = emulators[batchIndex].gameOver()
+    for _ in 0..<stepCount { reward += Float(emulators[batchIndex].act(using: action)) }
+    let finished = finishEpisodeOnLostLife ?
+      emulators[batchIndex].lives() < startingLives[batchIndex] :
+      emulators[batchIndex].gameOver()
     if finished { needsReset[batchIndex] = true }
     return Step<Tensor<UInt8>, Tensor<Float>>(
       kind: finished ? .last : .transition,
@@ -161,6 +171,7 @@ public struct ArcadeEnvironment: Environment {
       using: emulators.map { ArcadeEmulator(copying: $0) },
       observationsType: observationsType,
       useMinimalActionSet: useMinimalActionSet,
+      finishEpisodeOnLostLife: finishEpisodeOnLostLife,
       frameSkip: frameSkip)
   }
 }
