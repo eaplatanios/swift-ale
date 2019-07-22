@@ -13,9 +13,10 @@
 // the License.
 
 import ArcadeLearningEnvironment
+import Logging
 import ReinforcementLearning
 
-fileprivate struct ArcadeActorCritic: Network {
+struct ArcadeActorCritic: Network {
   @noDerivative public var state: None = None()
 
   public var conv1: Conv2D<Float> = Conv2D<Float>(filterShape: (8, 8, 1, 4), strides: (4, 4))
@@ -26,7 +27,7 @@ fileprivate struct ArcadeActorCritic: Network {
 
   public init() {}
 
-  public init(copying other: RetroActorCritic) {
+  public init(copying other: ArcadeActorCritic) {
     conv1 = other.conv1
     conv2 = other.conv2
     denseHidden = other.denseHidden
@@ -36,6 +37,7 @@ fileprivate struct ArcadeActorCritic: Network {
 
   @differentiable
   public func callAsFunction(_ input: Tensor<UInt8>) -> ActorCriticOutput<Categorical<Int32>> {
+    let input = Tensor<Float>(input) / 255.0
     let outerDimCount = input.rank - 3
     let outerDims = [Int](input.shape.dimensions[0..<outerDimCount])
     let flattenedBatchInput = input.flattenedBatch(outerDimCount: outerDimCount)
@@ -51,8 +53,11 @@ fileprivate struct ArcadeActorCritic: Network {
   }
 }
 
+let logger = Logger(label: "Breakout PPO")
+
+let batchSize = 1
 let emulator = ArcadeEmulator()
-emulator.loadGame(.breakout)
+try emulator.loadGame(.breakout)
 var environment = ArcadeEnvironment(
   using: emulator,
   observationsType: .screen(height: 84, width: 84, format: .grayscale),
@@ -62,7 +67,7 @@ var averageEpisodeReward = AverageEpisodeReward<
   Tensor<UInt8>,
   Tensor<Int32>,
   None
->(batchSize: batchSize, batchSize: 1)
+>(batchSize: batchSize, bufferSize: 10)
 
 let discountFactor = Float(0.9)
 let entropyRegularizationWeight = Float(0.0)
@@ -81,13 +86,13 @@ for step in 0..<10000 {
     maxEpisodes: 1,
     stepCallbacks: [{ trajectory in
       averageEpisodeReward.update(using: trajectory)
-      if step > 1000 {
-        try! renderer.render(Tensor<UInt8>(255 * trajectory.observation
-          .reshaped(to: [84, 84, 1])
-          .tiled(multiples: Tensor<Int32>([1, 1, 3]))))
-      }
+      // if step > 1000 {
+      //   try! renderer.render(Tensor<UInt8>(255 * trajectory.observation
+      //     .reshaped(to: [84, 84, 1])
+      //     .tiled(multiples: Tensor<Int32>([1, 1, 3]))))
+      // }
     }])
   if step % 1 == 0 {
-    print("Step \(step) | Loss: \(loss) | Average Episode Reward: \(averageEpisodeReward.value())")
+    logger.info("Step \(step) | Loss: \(loss) | Average Episode Reward: \(averageEpisodeReward.value())")
   }
 }

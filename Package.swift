@@ -16,6 +16,7 @@ let package = Package(
       targets: ["ArcadeLearningEnvironmentExperiments"]),
   ],
   dependencies: [
+    .package(url: "https://github.com/apple/swift-log.git", from: "1.0.0"),
     .package(url: "https://github.com/eaplatanios/retro-swift.git", .branch("master")),
   ],
   targets: [
@@ -29,7 +30,7 @@ let package = Package(
       path: "Sources/ArcadeLearningEnvironment"),
     .target(
       name: "ArcadeLearningEnvironmentExperiments",
-      dependencies: ["ArcadeLearningEnvironment"],
+      dependencies: ["ArcadeLearningEnvironment", "Logging"],
       path: "Sources/ArcadeLearningEnvironmentExperiments"),
   ]
 )
