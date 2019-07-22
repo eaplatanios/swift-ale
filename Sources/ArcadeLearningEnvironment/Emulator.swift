@@ -103,7 +103,7 @@ public final class ArcadeEmulator {
 
   @inlinable
   public func loadGame(_ game: Game) throws {
-    try loadROM(handle, game.romPath(in: gameROMsPath).absoluteString)
+    try loadROM(handle, game.romPath(in: gameROMsPath).path)
   }
 
   @inlinable
