@@ -1,8 +1,0 @@
-
-Name: ale
-Description: The Arcade Learning Environment (ALE) - a platform for AI research.
-URL: http://www.arcadelearningenvironment.org/
-Version: 0.6
-Requires:
-Libs: -L/usr/local/lib -lale
-Cflags: -I/usr/local/include
