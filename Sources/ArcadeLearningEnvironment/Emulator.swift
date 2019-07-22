@@ -13,18 +13,33 @@
 // the License.
 
 import CArcadeLearningEnvironment
+import Foundation
 import TensorFlow
 
 public final class ArcadeEmulator {
   @usableFromInline internal var handle: UnsafeMutablePointer<ALEInterface?>?
   @usableFromInline static internal var defaultLoggingMode: LoggingMode? = nil
 
+  public let gameROMsPath: URL
+  public let repeatActionProbability: Float
+  public let randomSeed: Int?
+
   @inlinable
-  public init() {
-    if ArcadeEmulator.defaultLoggingMode == nil {
-      ArcadeEmulator.setLoggingMode(.error)
-    }
+  public init(
+    gameROMsPath: URL? = nil,
+    repeatActionProbability: Float = 0.0,
+    randomSeed: Int? = nil
+  ) {
+    if ArcadeEmulator.defaultLoggingMode == nil { ArcadeEmulator.setLoggingMode(.error) }
     self.handle = ALE_new()
+    self.gameROMsPath = gameROMsPath ?? 
+      URL(fileURLWithPath: FileManager.default.currentDirectoryPath)
+      .appendingPathComponent("data")
+      .appendingPathComponent("roms")
+    self.repeatActionProbability = repeatActionProbability
+    self.randomSeed = randomSeed
+    if let r = randomSeed { self["random_seed"] = r }
+    self["repeat_action_probability"] = repeatActionProbability
   }
 
   @inlinable
@@ -79,8 +94,8 @@ public final class ArcadeEmulator {
   }
 
   @inlinable
-  public func loadGameROM(from path: String) {
-    loadROM(handle, path)
+  public func loadGame(_ game: Game) throws {
+    try loadROM(handle, game.romPath(in: gameROMsPath).absoluteString)
   }
 
   @inlinable
@@ -99,8 +114,8 @@ public final class ArcadeEmulator {
   }
 
   @inlinable
-  public func takeAction(using action: Int) -> Int {
-    Int(act(handle, Int32(action)))
+  public func act(using action: Action) -> Int {
+    Int(CArcadeLearningEnvironment.act(handle, action.rawValue))
   }
 
   @inlinable
@@ -140,19 +155,19 @@ public final class ArcadeEmulator {
   }
 
   @inlinable
-  public func legalActions() -> [Int] {
+  public func legalActions() -> [Action] {
     let count = Int(getLegalActionSize(handle))
     let actions = UnsafeMutablePointer<Int32>.allocate(capacity: count)
     getLegalActionSet(handle, actions)
-    return [Int32](UnsafeBufferPointer(start: actions, count: count)).map(Int.init)
+    return [Int32](UnsafeBufferPointer(start: actions, count: count)).map { Action(rawValue: $0)! }
   }
 
   @inlinable
-  public func minimalActions() -> [Int] {
+  public func minimalActions() -> [Action] {
     let count = Int(getMinimalActionSize(handle))
     let actions = UnsafeMutablePointer<Int32>.allocate(capacity: count)
     getMinimalActionSet(handle, actions)
-    return [Int32](UnsafeBufferPointer(start: actions, count: count)).map(Int.init)
+    return [Int32](UnsafeBufferPointer(start: actions, count: count)).map { Action(rawValue: $0)! }
   }
 
   /// Returns the screen size of this emulator.
@@ -226,7 +241,9 @@ extension ArcadeEmulator {
   public enum LoggingMode: Int32 {
     case info = 0, warning, error
   }
+}
 
+extension ArcadeEmulator {
   /// Emulator state.
   public final class State {
     @usableFromInline internal var handle: UnsafeMutablePointer<ALEState?>?
@@ -257,7 +274,17 @@ extension ArcadeEmulator {
       return [Int8](UnsafeBufferPointer(start: bytes, count: size))
     }
   }
+}
 
+extension ArcadeEmulator {
+  /// Actions that an agent can take in this emulator.
+  public enum Action: Int32 {
+    case noOp = 0, fire, up, right, left, down, upRight, upLeft, downRight, downLeft,
+      upFire, rightFire, leftFire, downFire, upRightFire, upLeftFire, downRightFire, downLeftFire
+  }
+}
+
+extension ArcadeEmulator {
   public enum ScreenFormat {
     /// Raw pixel values from the emulator screen, before any conversion (e.g., to RGB)
     /// takes place. The screen tensor shape is `[height * width]`, where `height` and `width` are
@@ -293,7 +320,7 @@ extension ArcadeEmulator {
 }
 
 extension ArcadeEmulator {
-  public enum Games: String, CaseIterable {
+  public enum Game: String, CaseIterable {
     case adventure = "adventure"
     case airRaid = "air_raid"
     case alien = "alien"
@@ -357,5 +384,13 @@ extension ArcadeEmulator {
     case wizardOfWor = "wizard_of_wor"
     case yarsRevenge = "yars_revenge"
     case zaxxon = "zaxxon"
+
+    public func romPath(in gameROMsPath: URL) throws -> URL {
+      let fileURL = gameROMsPath.appendingPathComponent("\(rawValue).bin")
+      let atariPyGitHub = "https://github.com/openai/atari-py/blob/master/atari_py/atari_roms"
+      let gitHubURL = URL(string: "\(atariPyGitHub)/\(rawValue).bin?raw=true")!
+      try maybeDownload(from: gitHubURL, to: fileURL)
+      return fileURL
+    }
   }
 }
