@@ -12,6 +12,7 @@
 // License for the specific language governing permissions and limitations under
 // the License.
 
+import Foundation
 import ReinforcementLearning
 import TensorFlow
 
@@ -41,6 +42,10 @@ public struct ArcadeEnvironment: Environment {
   @usableFromInline internal var step: Step<Tensor<UInt8>, Tensor<Float>>? = nil
   @usableFromInline internal var renderer: ImageRenderer? = nil
 
+  /// Dispatch queue used to synchronize updates on mutable shared objects when using
+  /// parallelized batch processing.
+  @usableFromInline internal let dispatchQueue: DispatchQueue?
+
   /// Number of distinct actions that are available in the managed arcade emulators.
   public var actionCount: Int { actionSet.count }
 
@@ -50,7 +55,8 @@ public struct ArcadeEnvironment: Environment {
     useMinimalActionSet: Bool = true,
     finishEpisodeOnLostLife: Bool = true,
     frameSkip: FrameSkip = .stochastic(minCount: 2, maxCount: 5),
-    renderer: ImageRenderer? = nil
+    renderer: ImageRenderer? = nil,
+    parallelizedBatchProcessing: Bool = true
   ) {
     self.init(
       using: [emulator],
@@ -58,7 +64,8 @@ public struct ArcadeEnvironment: Environment {
       useMinimalActionSet: useMinimalActionSet,
       finishEpisodeOnLostLife: finishEpisodeOnLostLife,
       frameSkip: frameSkip,
-      renderer: renderer)
+      renderer: renderer,
+      parallelizedBatchProcessing: parallelizedBatchProcessing)
   }
 
   public init(
@@ -67,7 +74,8 @@ public struct ArcadeEnvironment: Environment {
     useMinimalActionSet: Bool = true,
     finishEpisodeOnLostLife: Bool = true,
     frameSkip: FrameSkip = .stochastic(minCount: 2, maxCount: 5),
-    renderer: ImageRenderer? = nil
+    renderer: ImageRenderer? = nil,
+    parallelizedBatchProcessing: Bool = true
   ) {
     precondition(emulators.count > 0, "At least one emulator must be provided.")
     self.batchSize = emulators.count
@@ -76,6 +84,9 @@ public struct ArcadeEnvironment: Environment {
     self.finishEpisodeOnLostLife = finishEpisodeOnLostLife
     self.frameSkip = frameSkip
     self.renderer = renderer
+    self.dispatchQueue = parallelizedBatchProcessing && emulators.count > 1 ?
+      DispatchQueue(label: "Arcade Learning Environment") :
+      nil
     self.actionSet = useMinimalActionSet ?
         emulators[0].minimalActions() :
         emulators[0].legalActions()
@@ -121,46 +132,73 @@ public struct ArcadeEnvironment: Environment {
     }
   }
 
-  @discardableResult
   @inlinable
+  @discardableResult
   public mutating func step(taking action: Tensor<Int32>) -> Step<Tensor<UInt8>, Tensor<Float>> {
     let actions = action.unstacked()
-    step = Step<Tensor<UInt8>, Tensor<Float>>.stack((0..<batchSize).map {
-      step(taking: actions[$0], batchIndex: $0)
+
+    // Check if we need to use the parallelized version.
+    if let dispatchQueue = self.dispatchQueue {
+      var steps = Array<Step<Tensor<UInt8>, Tensor<Float>>?>(repeating: nil, count: batchSize)
+      DispatchQueue.concurrentPerform(iterations: batchSize) { batchIndex in
+        if needsReset[batchIndex] {
+          emulators[batchIndex].resetGame()
+          let step = Step<Tensor<UInt8>, Tensor<Float>>(
+            kind: .first,
+            observation: currentObservation(batchIndex: batchIndex),
+            reward: Tensor<Float>(0.0))
+          dispatchQueue.sync {
+            steps[batchIndex] = step
+            needsReset[batchIndex] = false
+          }
+          return
+        }
+        let action = actionSet[Int(actions[batchIndex].scalarized())]
+        var reward = Float(0.0)
+        let stepCount = dispatchQueue.sync { frameSkip.count(rng: &rngs[batchIndex]) }
+        for _ in 0..<stepCount { reward += Float(emulators[batchIndex].act(using: action)) }
+        let finished = finishEpisodeOnLostLife ?
+          emulators[batchIndex].lives() < startingLives[batchIndex] :
+          emulators[batchIndex].gameOver()
+        let step = Step<Tensor<UInt8>, Tensor<Float>>(
+          kind: finished ? .last : .transition,
+          observation: currentObservation(batchIndex: batchIndex),
+          reward: Tensor<Float>(Float(reward)))
+        dispatchQueue.sync {
+          steps[batchIndex] = step
+          needsReset[batchIndex] = finished
+        }
+      }
+      step = Step<Tensor<UInt8>, Tensor<Float>>.stack(steps.map { $0! })
+      return step!
+    }
+
+    step = Step<Tensor<UInt8>, Tensor<Float>>.stack((0..<batchSize).map { batchIndex in
+      if needsReset[batchIndex] { reset(batchIndex: batchIndex) }
+      let action = actionSet[Int(actions[batchIndex].scalarized())]
+      var reward = Float(0.0)
+      let stepCount = frameSkip.count(rng: &rngs[batchIndex])
+      for _ in 0..<stepCount { reward += Float(emulators[batchIndex].act(using: action)) }
+      needsReset[batchIndex] = finishEpisodeOnLostLife ?
+        emulators[batchIndex].lives() < startingLives[batchIndex] :
+        emulators[batchIndex].gameOver()
+      return Step<Tensor<UInt8>, Tensor<Float>>(
+        kind: needsReset[batchIndex] ? .last : .transition,
+        observation: currentObservation(batchIndex: batchIndex),
+        reward: Tensor<Float>(Float(reward)))
     })
     return step!
   }
 
-  @discardableResult
   @inlinable
-  public mutating func step(
-    taking action: Tensor<Int32>,
-    batchIndex: Int
-  ) -> Step<Tensor<UInt8>, Tensor<Float>> {
-    if needsReset[batchIndex] { reset(batchIndex: batchIndex) }
-    let action = actionSet[Int(action.scalarized())]
-    var reward = Float(0.0)
-    let stepCount = frameSkip.count(rng: &rngs[batchIndex])
-    for _ in 0..<stepCount { reward += Float(emulators[batchIndex].act(using: action)) }
-    let finished = finishEpisodeOnLostLife ?
-      emulators[batchIndex].lives() < startingLives[batchIndex] :
-      emulators[batchIndex].gameOver()
-    if finished { needsReset[batchIndex] = true }
-    return Step<Tensor<UInt8>, Tensor<Float>>(
-      kind: finished ? .last : .transition,
-      observation: currentObservation(batchIndex: batchIndex),
-      reward: Tensor<Float>(Float(reward)))
-  }
-
   @discardableResult
-  @inlinable
   public mutating func reset() -> Step<Tensor<UInt8>, Tensor<Float>> {
     step = Step<Tensor<UInt8>, Tensor<Float>>.stack((0..<batchSize).map { reset(batchIndex: $0) })
     return step!
   }
 
-  @discardableResult
   @inlinable
+  @discardableResult
   public mutating func reset(batchIndex: Int) -> Step<Tensor<UInt8>, Tensor<Float>> {
     emulators[batchIndex].resetGame()
     needsReset[batchIndex] = false
@@ -178,13 +216,15 @@ public struct ArcadeEnvironment: Environment {
       useMinimalActionSet: useMinimalActionSet,
       finishEpisodeOnLostLife: finishEpisodeOnLostLife,
       frameSkip: frameSkip,
-      renderer: renderer)
+      renderer: renderer,
+      parallelizedBatchProcessing: dispatchQueue != nil)
   }
 
   @inlinable
   public mutating func render() throws {
     if renderer == nil { renderer = ImageRenderer() }
-    let observation = currentStep().observation
+    // TODO: Better support batchSize > 1.
+    let observation = currentStep().observation[0]
     switch observationsType {
     case let .screen(height, width, .raw), let .screen(height, width, .grayscale):
       try renderer!.render(

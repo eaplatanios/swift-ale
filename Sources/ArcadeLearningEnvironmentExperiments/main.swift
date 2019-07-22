@@ -41,9 +41,9 @@ struct ArcadeActorCritic: Network {
     let outerDimCount = input.rank - 3
     let outerDims = [Int](input.shape.dimensions[0..<outerDimCount])
     let flattenedBatchInput = input.flattenedBatch(outerDimCount: outerDimCount)
-    let conv1 = leakyRelu(self.conv1(flattenedBatchInput))
-    let conv2 = leakyRelu(self.conv2(conv1)).reshaped(to: [-1, 324])
-    let hidden = leakyRelu(denseHidden(conv2))
+    let conv1 = relu(self.conv1(flattenedBatchInput))
+    let conv2 = relu(self.conv2(conv1)).reshaped(to: [-1, 324])
+    let hidden = relu(denseHidden(conv2))
     let actionLogits = denseAction(hidden)
     let flattenedValue = denseValue(hidden)
     let flattenedActionDistribution = Categorical<Int32>(logits: actionLogits)
@@ -55,13 +55,17 @@ struct ArcadeActorCritic: Network {
 
 let logger = Logger(label: "Breakout PPO")
 
-let batchSize = 1
-let emulator = ArcadeEmulator()
-try emulator.loadGame(.breakout)
+let batchSize = 64
+let emulators = (0..<batchSize).map { _ -> ArcadeEmulator in
+  let emulator = ArcadeEmulator()
+  try! emulator.loadGame(.breakout)
+  return emulator
+}
 var environment = ArcadeEnvironment(
-  using: emulator,
+  using: emulators,
   observationsType: .screen(height: 84, width: 84, format: .grayscale),
-  useMinimalActionSet: true)
+  useMinimalActionSet: true,
+  parallelizedBatchProcessing: true)
 
 var averageEpisodeReward = AverageEpisodeReward<
   Tensor<UInt8>,
@@ -69,7 +73,7 @@ var averageEpisodeReward = AverageEpisodeReward<
   None
 >(batchSize: batchSize, bufferSize: 100)
 
-let discountFactor = Float(0.99)
+let discountFactor = Float(0.9)
 let discountWeight = Float(0.95)
 let entropyRegularizationWeight = Float(0.01)
 let network = ArcadeActorCritic()
@@ -88,12 +92,12 @@ for step in 0..<10000 {
   let loss = agent.update(
     using: &environment,
     maxSteps: 100,
-    maxEpisodes: 1,
+    maxEpisodes: 1 * batchSize,
     stepCallbacks: [{ (environment, trajectory) in
       averageEpisodeReward.update(using: trajectory)
-      if step > 0 { try! environment.render() }
+      // if step > 0 { try! environment.render() }
     }])
-  if step % 100 == 0 {
+  if step % 10 == 0 {
     logger.info("Step \(step) | Loss: \(loss) | Average Episode Reward: \(averageEpisodeReward.value())")
   }
 }
