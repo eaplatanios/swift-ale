@@ -19,11 +19,11 @@ import ReinforcementLearning
 struct ArcadeActorCritic: Network {
   @noDerivative public var state: None = None()
 
-  public var conv1: Conv2D<Float> = Conv2D<Float>(filterShape: (8, 8, 1, 4), strides: (4, 4))
-  public var conv2: Conv2D<Float> = Conv2D<Float>(filterShape: (4, 4, 4, 4), strides: (2, 2))
-  public var denseHidden: Dense<Float> = Dense<Float>(inputSize: 324, outputSize: 8)
-  public var denseAction: Dense<Float> = Dense<Float>(inputSize: 8, outputSize: 4) // TODO: Easy way to get the number of actions.
-  public var denseValue: Dense<Float> = Dense<Float>(inputSize: 8, outputSize: 1)
+  public var conv1: Conv2D<Float> = Conv2D<Float>(filterShape: (8, 8, 4, 32), strides: (4, 4))
+  public var conv2: Conv2D<Float> = Conv2D<Float>(filterShape: (4, 4, 32, 64), strides: (2, 2))
+  public var denseHidden: Dense<Float> = Dense<Float>(inputSize: 5184, outputSize: 16)
+  public var denseAction: Dense<Float> = Dense<Float>(inputSize: 16, outputSize: 4) // TODO: Easy way to get the number of actions.
+  public var denseValue: Dense<Float> = Dense<Float>(inputSize: 16, outputSize: 1)
 
   public init() {}
 
@@ -42,7 +42,7 @@ struct ArcadeActorCritic: Network {
     let outerDims = [Int](input.shape.dimensions[0..<outerDimCount])
     let flattenedBatchInput = input.flattenedBatch(outerDimCount: outerDimCount)
     let conv1 = relu(self.conv1(flattenedBatchInput))
-    let conv2 = relu(self.conv2(conv1)).reshaped(to: [-1, 324])
+    let conv2 = relu(self.conv2(conv1)).reshaped(to: [-1, 5184])
     let hidden = relu(denseHidden(conv2))
     let actionLogits = denseAction(hidden)
     let flattenedValue = denseValue(hidden)
@@ -55,7 +55,7 @@ struct ArcadeActorCritic: Network {
 
 let logger = Logger(label: "Breakout PPO")
 
-let batchSize = 64
+let batchSize = 1
 let emulators = (0..<batchSize).map { _ -> ArcadeEmulator in
   let emulator = ArcadeEmulator()
   try! emulator.loadGame(.breakout)
@@ -65,15 +65,18 @@ var environment = ArcadeEnvironment(
   using: emulators,
   observationsType: .screen(height: 84, width: 84, format: .grayscale),
   useMinimalActionSet: true,
-  parallelizedBatchProcessing: true)
+  frameStackCount: 4,
+  parallelizedBatchProcessing: false)
+
+print("Number of valid actions: \(environment.actionCount)")
 
 var averageEpisodeReward = AverageEpisodeReward<
   Tensor<UInt8>,
   Tensor<Int32>,
   None
->(batchSize: batchSize, bufferSize: 100)
+>(batchSize: batchSize, bufferSize: 10)
 
-let discountFactor = Float(0.9)
+let discountFactor = Float(0.99)
 let discountWeight = Float(0.95)
 let entropyRegularizationWeight = Float(0.01)
 let network = ArcadeActorCritic()
@@ -84,20 +87,21 @@ var agent = PPOAgent(
   advantageFunction: GeneralizedAdvantageEstimation(
     discountFactor: discountFactor,
     discountWeight: discountWeight),
-  clip: PPOClip(),
+  clip: PPOClip(epsilon: 0.1),
+  penalty: PPOPenalty(klCutoffFactor: 0.5),
   entropyRegularization: PPOEntropyRegularization(weight: entropyRegularizationWeight),
   valueEstimationLossWeight: 1.0,
-  iterationCountPerUpdate: 4)
+  iterationCountPerUpdate: 10)
 for step in 0..<10000 {
   let loss = agent.update(
     using: &environment,
-    maxSteps: 100,
-    maxEpisodes: 1 * batchSize,
+    maxSteps: 100 * batchSize,
+    maxEpisodes: 10 * batchSize,
     stepCallbacks: [{ (environment, trajectory) in
       averageEpisodeReward.update(using: trajectory)
-      // if step > 0 { try! environment.render() }
+      // if step > 10 { try! environment.render() }
     }])
-  if step % 10 == 0 {
+  if step % 1 == 0 {
     logger.info("Step \(step) | Loss: \(loss) | Average Episode Reward: \(averageEpisodeReward.value())")
   }
 }

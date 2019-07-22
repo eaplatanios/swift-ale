@@ -31,12 +31,14 @@ public struct ArcadeEnvironment: Environment {
   public let useMinimalActionSet: Bool
   public let finishEpisodeOnLostLife: Bool
   public let frameSkip: FrameSkip
+  public let frameStackCount: Int
   public let actionSpace: Discrete
   public let observationsType: ArcadeObservationsType
   public let observationSpace: DiscreteBox<UInt8>
 
   @usableFromInline internal let actionSet: [ArcadeEmulator.Action]
   @usableFromInline internal var startingLives: [Int]
+  @usableFromInline internal var frameStacks: [FrameStack]
   @usableFromInline internal var needsReset: [Bool]
   @usableFromInline internal var rngs: [PhiloxRandomNumberGenerator]
   @usableFromInline internal var step: Step<Tensor<UInt8>, Tensor<Float>>? = nil
@@ -55,6 +57,7 @@ public struct ArcadeEnvironment: Environment {
     useMinimalActionSet: Bool = true,
     finishEpisodeOnLostLife: Bool = true,
     frameSkip: FrameSkip = .stochastic(minCount: 2, maxCount: 5),
+    frameStackCount: Int = 4,
     renderer: ImageRenderer? = nil,
     parallelizedBatchProcessing: Bool = true
   ) {
@@ -64,6 +67,7 @@ public struct ArcadeEnvironment: Environment {
       useMinimalActionSet: useMinimalActionSet,
       finishEpisodeOnLostLife: finishEpisodeOnLostLife,
       frameSkip: frameSkip,
+      frameStackCount: frameStackCount,
       renderer: renderer,
       parallelizedBatchProcessing: parallelizedBatchProcessing)
   }
@@ -74,15 +78,18 @@ public struct ArcadeEnvironment: Environment {
     useMinimalActionSet: Bool = true,
     finishEpisodeOnLostLife: Bool = true,
     frameSkip: FrameSkip = .stochastic(minCount: 2, maxCount: 5),
+    frameStackCount: Int = 4,
     renderer: ImageRenderer? = nil,
     parallelizedBatchProcessing: Bool = true
   ) {
     precondition(emulators.count > 0, "At least one emulator must be provided.")
+    precondition(frameStackCount > 1, "The frame stack size must be at least 1.")
     self.batchSize = emulators.count
     self.emulators = emulators
     self.useMinimalActionSet = useMinimalActionSet
     self.finishEpisodeOnLostLife = finishEpisodeOnLostLife
     self.frameSkip = frameSkip
+    self.frameStackCount = frameStackCount
     self.renderer = renderer
     self.dispatchQueue = parallelizedBatchProcessing && emulators.count > 1 ?
       DispatchQueue(label: "Arcade Learning Environment") :
@@ -105,10 +112,11 @@ public struct ArcadeEnvironment: Environment {
         upperBound: 255)
     }
     self.startingLives = emulators.map { $0.lives() }
+    self.frameStacks = [FrameStack](repeating: FrameStack(size: frameStackCount), count: batchSize)
     self.needsReset = [Bool](repeating: true, count: batchSize)
     self.rngs = (0..<batchSize).map { _ in
       let seed = Context.local.randomSeed
-      return PhiloxRandomNumberGenerator(seed: Int(seed.graph + seed.op))
+      return PhiloxRandomNumberGenerator(seed: Int(seed.graph &+ seed.op))
     }
   }
 
@@ -119,17 +127,24 @@ public struct ArcadeEnvironment: Environment {
   }
 
   @inlinable
-  internal func currentObservation(batchIndex: Int) -> Tensor<UInt8> {
+  internal mutating func currentObservation(batchIndex: Int) -> Tensor<UInt8> {
+    var frame: Tensor<UInt8>
     switch observationsType {
     case let .screen(height, width, format):
       let emulatorScreen = emulators[batchIndex].screen(format: format)
-      return resize(
+      frame = resize(
         images: emulatorScreen,
         to: Tensor<Int32>([Int32(height), Int32(width)]),
         method: .area)
     case .memory:
-      return emulators[batchIndex].memory()
+      frame = emulators[batchIndex].memory()
     }
+    if let dispatchQueue = self.dispatchQueue {
+      dispatchQueue.sync { frameStacks[batchIndex].push(frame) }
+    } else {
+      frameStacks[batchIndex].push(frame)
+    }
+    return Tensor<UInt8>(concatenating: frameStacks[batchIndex].frames(), alongAxis: -1)
   }
 
   @inlinable
@@ -157,9 +172,8 @@ public struct ArcadeEnvironment: Environment {
         var reward = Float(0.0)
         let stepCount = dispatchQueue.sync { frameSkip.count(rng: &rngs[batchIndex]) }
         for _ in 0..<stepCount { reward += Float(emulators[batchIndex].act(using: action)) }
-        let finished = finishEpisodeOnLostLife ?
-          emulators[batchIndex].lives() < startingLives[batchIndex] :
-          emulators[batchIndex].gameOver()
+        let finished = emulators[batchIndex].gameOver() || 
+          (finishEpisodeOnLostLife && emulators[batchIndex].lives() < startingLives[batchIndex])
         let step = Step<Tensor<UInt8>, Tensor<Float>>(
           kind: finished ? .last : .transition,
           observation: currentObservation(batchIndex: batchIndex),
@@ -179,9 +193,8 @@ public struct ArcadeEnvironment: Environment {
       var reward = Float(0.0)
       let stepCount = frameSkip.count(rng: &rngs[batchIndex])
       for _ in 0..<stepCount { reward += Float(emulators[batchIndex].act(using: action)) }
-      needsReset[batchIndex] = finishEpisodeOnLostLife ?
-        emulators[batchIndex].lives() < startingLives[batchIndex] :
-        emulators[batchIndex].gameOver()
+      needsReset[batchIndex] = emulators[batchIndex].gameOver() || 
+        (finishEpisodeOnLostLife && emulators[batchIndex].lives() < startingLives[batchIndex])
       return Step<Tensor<UInt8>, Tensor<Float>>(
         kind: needsReset[batchIndex] ? .last : .transition,
         observation: currentObservation(batchIndex: batchIndex),
@@ -216,6 +229,7 @@ public struct ArcadeEnvironment: Environment {
       useMinimalActionSet: useMinimalActionSet,
       finishEpisodeOnLostLife: finishEpisodeOnLostLife,
       frameSkip: frameSkip,
+      frameStackCount: frameStackCount,
       renderer: renderer,
       parallelizedBatchProcessing: dispatchQueue != nil)
   }
@@ -256,6 +270,41 @@ extension ArcadeEnvironment {
       case .none: return 1
       case let .constant(count): return count
       case let .stochastic(min, max): return Int.random(in: min...max, using: &rng)
+      }
+    }
+  }
+
+  // TODO: Find a way to make this "replay-buffer-friendly" so that it doesn't store duplicate
+  // copies of each frame.
+  public struct FrameStack {
+    public let size: Int
+
+    @usableFromInline internal var index: Int = 0
+    @usableFromInline internal var buffer: [Tensor<UInt8>] = []
+
+    @inlinable
+    public init(size: Int) {
+      self.size = size
+    }
+
+    @inlinable
+    public mutating func push(_ frame: Tensor<UInt8>) {
+      if buffer.count == size {
+        buffer[index] = frame
+      } else {
+        buffer.append(frame)
+      }
+      index = (index + 1) % size
+    }
+
+    @inlinable
+    public func frames() -> [Tensor<UInt8>] {
+      if buffer.count == size {
+        if index == 0 { return buffer }
+        return [Tensor<UInt8>](buffer[(index - 1)...] + buffer[..<(index - 1)])
+      } else {
+        return [Tensor<UInt8>](
+          [Tensor<UInt8>](repeating: buffer[0], count: size - index) + buffer[0..<index])
       }
     }
   }
