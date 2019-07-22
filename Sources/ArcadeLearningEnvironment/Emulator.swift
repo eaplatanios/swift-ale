@@ -38,7 +38,7 @@ public final class ArcadeEmulator {
       .appendingPathComponent("roms")
     self.repeatActionProbability = repeatActionProbability
     self.randomSeed = randomSeed
-    if let r = randomSeed { self["random_seed"] = Int(r.graph + r.op) }
+    if let r = randomSeed { self["random_seed"] = Int(r.graph &+ r.op) }
     self["repeat_action_probability"] = repeatActionProbability
   }
 
@@ -52,7 +52,7 @@ public final class ArcadeEmulator {
 
   @inlinable
   deinit {
-    ALE_del(handle)
+    if let h = handle { ALE_del(h) }
   }
 
   /// State of this emulator.
@@ -270,7 +270,7 @@ extension ArcadeEmulator {
 
     @inlinable
     deinit {
-      deleteState(handle)
+      if let h = handle { deleteState(h) }
     }
 
     /// Returns an encoded representation of this state as a byte array.
@@ -319,7 +319,7 @@ extension ArcadeEmulator {
     @inlinable
     public func shape(height: Int, width: Int) -> TensorShape {
       switch self {
-      case .raw: return TensorShape(height, width)
+      case .raw: return TensorShape(height * width)
       case .rgb: return TensorShape(height, width, 3)
       case .grayscale: return TensorShape(height, width, 1)
       }
