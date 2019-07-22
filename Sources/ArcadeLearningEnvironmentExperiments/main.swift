@@ -21,9 +21,9 @@ struct ArcadeActorCritic: Network {
 
   public var conv1: Conv2D<Float> = Conv2D<Float>(filterShape: (8, 8, 1, 4), strides: (4, 4))
   public var conv2: Conv2D<Float> = Conv2D<Float>(filterShape: (4, 4, 4, 4), strides: (2, 2))
-  public var denseHidden: Dense<Float> = Dense<Float>(inputSize: 324, outputSize: 32)
-  public var denseAction: Dense<Float> = Dense<Float>(inputSize: 32, outputSize: 4) // TODO: Easy way to get the number of actions.
-  public var denseValue: Dense<Float> = Dense<Float>(inputSize: 32, outputSize: 1)
+  public var denseHidden: Dense<Float> = Dense<Float>(inputSize: 324, outputSize: 8)
+  public var denseAction: Dense<Float> = Dense<Float>(inputSize: 8, outputSize: 4) // TODO: Easy way to get the number of actions.
+  public var denseValue: Dense<Float> = Dense<Float>(inputSize: 8, outputSize: 1)
 
   public init() {}
 
@@ -67,32 +67,33 @@ var averageEpisodeReward = AverageEpisodeReward<
   Tensor<UInt8>,
   Tensor<Int32>,
   None
->(batchSize: batchSize, bufferSize: 10)
+>(batchSize: batchSize, bufferSize: 100)
 
-let discountFactor = Float(0.9)
-let entropyRegularizationWeight = Float(0.0)
+let discountFactor = Float(0.99)
+let discountWeight = Float(0.95)
+let entropyRegularizationWeight = Float(0.01)
 let network = ArcadeActorCritic()
 var agent = PPOAgent(
   for: environment,
   network: network,
-  optimizer: AMSGrad(for: network, learningRate: 1e-3),
-  advantageFunction: GeneralizedAdvantageEstimation(discountFactor: discountFactor),
+  optimizer: AMSGrad(for: network, learningRate: 1e-4),
+  advantageFunction: GeneralizedAdvantageEstimation(
+    discountFactor: discountFactor,
+    discountWeight: discountWeight),
   clip: PPOClip(),
-  entropyRegularization: PPOEntropyRegularization(weight: entropyRegularizationWeight))
+  entropyRegularization: PPOEntropyRegularization(weight: entropyRegularizationWeight),
+  valueEstimationLossWeight: 1.0,
+  iterationCountPerUpdate: 4)
 for step in 0..<10000 {
   let loss = agent.update(
     using: &environment,
-    maxSteps: 4000,
+    maxSteps: 100,
     maxEpisodes: 1,
-    stepCallbacks: [{ trajectory in
+    stepCallbacks: [{ (environment, trajectory) in
       averageEpisodeReward.update(using: trajectory)
-      // if step > 1000 {
-      //   try! renderer.render(Tensor<UInt8>(255 * trajectory.observation
-      //     .reshaped(to: [84, 84, 1])
-      //     .tiled(multiples: Tensor<Int32>([1, 1, 3]))))
-      // }
+      if step > 0 { try! environment.render() }
     }])
-  if step % 1 == 0 {
+  if step % 100 == 0 {
     logger.info("Step \(step) | Loss: \(loss) | Average Episode Reward: \(averageEpisodeReward.value())")
   }
 }

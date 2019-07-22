@@ -39,6 +39,7 @@ public struct ArcadeEnvironment: Environment {
   @usableFromInline internal var needsReset: [Bool]
   @usableFromInline internal var rngs: [PhiloxRandomNumberGenerator]
   @usableFromInline internal var step: Step<Tensor<UInt8>, Tensor<Float>>? = nil
+  @usableFromInline internal var renderer: ImageRenderer? = nil
 
   /// Number of distinct actions that are available in the managed arcade emulators.
   public var actionCount: Int { actionSet.count }
@@ -48,14 +49,16 @@ public struct ArcadeEnvironment: Environment {
     observationsType: ArcadeObservationsType = .screen(height: 84, width: 84, format: .grayscale),
     useMinimalActionSet: Bool = true,
     finishEpisodeOnLostLife: Bool = true,
-    frameSkip: FrameSkip = .stochastic(minCount: 2, maxCount: 5)
+    frameSkip: FrameSkip = .stochastic(minCount: 2, maxCount: 5),
+    renderer: ImageRenderer? = nil
   ) {
     self.init(
       using: [emulator],
       observationsType: observationsType,
       useMinimalActionSet: useMinimalActionSet,
       finishEpisodeOnLostLife: finishEpisodeOnLostLife,
-      frameSkip: frameSkip)
+      frameSkip: frameSkip,
+      renderer: renderer)
   }
 
   public init(
@@ -63,7 +66,8 @@ public struct ArcadeEnvironment: Environment {
     observationsType: ArcadeObservationsType = .screen(height: 84, width: 84, format: .grayscale),
     useMinimalActionSet: Bool = true,
     finishEpisodeOnLostLife: Bool = true,
-    frameSkip: FrameSkip = .stochastic(minCount: 2, maxCount: 5)
+    frameSkip: FrameSkip = .stochastic(minCount: 2, maxCount: 5),
+    renderer: ImageRenderer? = nil
   ) {
     precondition(emulators.count > 0, "At least one emulator must be provided.")
     self.batchSize = emulators.count
@@ -71,6 +75,7 @@ public struct ArcadeEnvironment: Environment {
     self.useMinimalActionSet = useMinimalActionSet
     self.finishEpisodeOnLostLife = finishEpisodeOnLostLife
     self.frameSkip = frameSkip
+    self.renderer = renderer
     self.actionSet = useMinimalActionSet ?
         emulators[0].minimalActions() :
         emulators[0].legalActions()
@@ -172,7 +177,30 @@ public struct ArcadeEnvironment: Environment {
       observationsType: observationsType,
       useMinimalActionSet: useMinimalActionSet,
       finishEpisodeOnLostLife: finishEpisodeOnLostLife,
-      frameSkip: frameSkip)
+      frameSkip: frameSkip,
+      renderer: renderer)
+  }
+
+  @inlinable
+  public mutating func render() throws {
+    if renderer == nil { renderer = ImageRenderer() }
+    let observation = currentStep().observation
+    switch observationsType {
+    case let .screen(height, width, .raw), let .screen(height, width, .grayscale):
+      try renderer!.render(
+        Tensor<UInt8>(255 * observation
+          .reshaped(to: [height, width, 1])
+          .tiled(multiples: Tensor<Int32>([1, 1, 3]))).array)
+    case let .screen(height, width, .rgb):
+      try renderer!.render(
+        Tensor<UInt8>(255 * observation.reshaped(to: [height, width, 3])).array)
+    case .memory:
+      let size = observation.shape.contiguousSize
+      try renderer!.render(
+        Tensor<UInt8>(255 * observation
+          .reshaped(to: [size / 2, size / 2, 1])
+          .tiled(multiples: Tensor<Int32>([1, 1, 3]))).array)
+    }
   }
 }
 
