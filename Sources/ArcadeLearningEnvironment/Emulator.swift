@@ -122,6 +122,7 @@ public final class ArcadeEmulator {
   }
 
   @inlinable
+  @discardableResult
   public func act(using action: Action) -> Int {
     Int(CArcadeLearningEnvironment.act(handle, action.rawValue))
   }

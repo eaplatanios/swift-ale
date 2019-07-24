@@ -15,6 +15,28 @@
 import Foundation
 import TensorFlow
 
+/// Creates an orthogonal matrix or tensor. 
+///
+/// If the shape of the tensor to initialize is two-dimensional, it is initialized with an 
+/// orthogonal matrix obtained from the QR decomposition of a matrix of random numbers drawn 
+/// from a normal distribution. If the matrix has fewer rows than columns then the output will 
+/// have orthogonal rows. Otherwise, the output will have orthogonal columns.
+/// 
+/// If the shape of the tensor to initialize is more than two-dimensional, a matrix of shape 
+/// `[shape[0] * ... * shape[rank - 2], shape[rank - 1]]` is initialized.  The matrix is 
+/// subsequently reshaped to give a tensor of the desired shape.
+///
+/// - Parameters:
+///   - shape: The shape of the tensor.
+///   - gain: A multiplicative factor to apply to the orthogonal tensor.
+///   - seed: A tuple of two integers to seed the random number generator.
+public func orthogonal<Scalar: TensorFlowFloatingPoint>(
+    gain: Tensor<Scalar> = Tensor<Scalar>(1),
+    seed: TensorFlowSeed = Context.local.randomSeed
+) -> ParameterInitializer<Scalar> {
+    { Tensor<Scalar>(orthogonal: $0, gain: gain, seed: seed) }
+}
+
 /// Downloads the file at `url` to `path`, if `path` does not exist.
 ///
 /// - Parameters:
