@@ -137,7 +137,7 @@ public final class ArcadeEnvironment: RenderableEnvironment {
 
     // Check if we need to use the parallelized version.
     if let dispatchQueue = self.dispatchQueue {
-      var steps = Array<Step<Tensor<UInt8>, Tensor<Float>>?>(repeating: nil, count: batchSize)
+      var steps = [Step<Tensor<UInt8>, Tensor<Float>>?](repeating: nil, count: batchSize)
       DispatchQueue.concurrentPerform(iterations: batchSize) { batchIndex in
         if needsReset[batchIndex] {
           dispatchQueue.sync { steps[batchIndex] = reset(batchIndex: batchIndex) }

@@ -151,6 +151,7 @@ public final class ArcadeEmulator {
   public func availableModes() -> [Int] {
     let count = Int(getAvailableModesSize(handle))
     let modes = UnsafeMutablePointer<Int32>.allocate(capacity: count)
+    defer { modes.deallocate() }
     getAvailableModes(handle, modes)
     return [Int32](UnsafeBufferPointer(start: modes, count: count)).map(Int.init)
   }
@@ -159,6 +160,7 @@ public final class ArcadeEmulator {
   public func availableDifficulties() -> [Int] {
     let count = Int(getAvailableDifficultiesSize(handle))
     let difficulties = UnsafeMutablePointer<Int32>.allocate(capacity: count)
+    defer { difficulties.deallocate() }
     getAvailableDifficulties(handle, difficulties)
     return [Int32](UnsafeBufferPointer(start: difficulties, count: count)).map(Int.init)
   }
@@ -167,6 +169,7 @@ public final class ArcadeEmulator {
   public func legalActions() -> [Action] {
     let count = Int(getLegalActionSize(handle))
     let actions = UnsafeMutablePointer<Int32>.allocate(capacity: count)
+    defer { actions.deallocate() }
     getLegalActionSet(handle, actions)
     return [Int32](UnsafeBufferPointer(start: actions, count: count)).map { Action(rawValue: $0)! }
   }
@@ -175,6 +178,7 @@ public final class ArcadeEmulator {
   public func minimalActions() -> [Action] {
     let count = Int(getMinimalActionSize(handle))
     let actions = UnsafeMutablePointer<Int32>.allocate(capacity: count)
+    defer { actions.deallocate() }
     getMinimalActionSet(handle, actions)
     return [Int32](UnsafeBufferPointer(start: actions, count: count)).map { Action(rawValue: $0)! }
   }
@@ -194,6 +198,7 @@ public final class ArcadeEmulator {
     let (height, width) = screenSize()
     let size = format.size(height: height, width: width)
     let screen = UnsafeMutablePointer<UInt8>.allocate(capacity: size)
+    defer { screen.deallocate() }
     switch format {
     case .raw: getScreen(handle, screen)
     case .rgb: getScreenRGB(handle, screen)
@@ -219,9 +224,10 @@ public final class ArcadeEmulator {
   @inlinable
   public func memory() -> Tensor<UInt8> {
     let size = Int(getRAMSize(handle))
-    let actions = UnsafeMutablePointer<UInt8>.allocate(capacity: size)
-    getRAM(handle, actions)
-    let memoryArray = [UInt8](UnsafeBufferPointer(start: actions, count: size))
+    let memory = UnsafeMutablePointer<UInt8>.allocate(capacity: size)
+    defer { memory.deallocate() }
+    getRAM(handle, memory)
+    let memoryArray = [UInt8](UnsafeBufferPointer(start: memory, count: size))
     return Tensor(shape: [size], scalars: memoryArray)
   }
 
@@ -279,6 +285,7 @@ extension ArcadeEmulator {
     public func encode() -> [Int8] {
       let size = Int(encodeStateLen(handle))
       let bytes = UnsafeMutablePointer<Int8>.allocate(capacity: size)
+      defer { bytes.deallocate() }
       encodeState(handle, bytes, Int32(size))
       return [Int8](UnsafeBufferPointer(start: bytes, count: size))
     }
