@@ -57,7 +57,7 @@ public final class ArcadeEmulator {
 
   /// State of this emulator.
   /// - Note: This state does *not* include pseudorandomness, making it suitable for planning
-  ///   purposes. In contrast, see `Emulator.systemState()`.
+  ///   purposes. In contrast, see `Emulator.systemState`.
   @inlinable
   public var state: State {
     get { State(handle: cloneState(handle)) }
@@ -66,7 +66,7 @@ public final class ArcadeEmulator {
 
   /// State of this emulator that is suitable for serialization.
   /// - Note: This state includes pseudorandomness, making it unsuitable for planning purposes.
-  ///   In contrast, see `Emulator.state()`.
+  ///   In contrast, see `Emulator.state`.
   @inlinable
   public var systemState: State {
     get { State(handle: cloneSystemState(handle)) }
@@ -269,7 +269,7 @@ extension ArcadeEmulator {
     }
 
     @inlinable
-    public init(encoded: [Int8]) {
+    public init(decoding encoded: [Int8]) {
       encoded.withUnsafeBufferPointer { pointer in
         self.handle = decodeState(pointer.baseAddress!, Int32(encoded.count))
       }
@@ -282,7 +282,7 @@ extension ArcadeEmulator {
 
     /// Returns an encoded representation of this state as a byte array.
     @inlinable
-    public func encode() -> [Int8] {
+    public func encoded() -> [Int8] {
       let size = Int(encodeStateLen(handle))
       let bytes = UnsafeMutablePointer<Int8>.allocate(capacity: size)
       defer { bytes.deallocate() }
@@ -401,6 +401,13 @@ extension ArcadeEmulator {
     case yarsRevenge = "yars_revenge"
     case zaxxon = "zaxxon"
 
+    /// Returns the complete URL to this game's ROM.
+    ///
+    /// - Parameter romPath: Path to the folder in which all game ROMs are stored.
+    /// - Returns: Complete URL to this game's ROM.
+    /// - Note: If the game ROM cannot be found, an attempt will be made to download it
+    ///   automatically. If the download succeeds, then the downloaded ROM file will be placed in
+    ///   `gameROMsPath`.
     public func romPath(in gameROMsPath: URL) throws -> URL {
       let fileURL = gameROMsPath.appendingPathComponent("\(rawValue).bin")
       let atariPyGitHub = "https://github.com/openai/atari-py/blob/master/atari_py/atari_roms"

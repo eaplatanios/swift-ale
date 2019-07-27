@@ -45,39 +45,17 @@ public final class ArcadeEnvironment: RenderableEnvironment {
   @usableFromInline internal var step: Step<Tensor<UInt8>, Tensor<Float>>? = nil
   @usableFromInline internal var renderer: ImageRenderer? = nil
 
-  /// Dispatch queue used to synchronize updates on mutable shared objects when using
-  /// parallelized batch processing.
+  /// Dispatch queue used to synchronize updates on mutable shared objects when using parallelized
+  /// batch processing.
   @usableFromInline internal let dispatchQueue: DispatchQueue?
 
   /// Number of distinct actions that are available in the managed arcade emulators.
   public var actionCount: Int { actionSet.count }
 
+  /// Current environment step (i.e., result of the last call to `ArcadeEnvironment.step()`).
   @inlinable public var currentStep: Step<Tensor<UInt8>, Tensor<Float>> {
     if step == nil { step = reset() }
     return step!
-  }
-
-  public convenience init(
-    using emulator: ArcadeEmulator,
-    observationsType: ArcadeObservationsType = .screen(height: 84, width: 84, format: .grayscale),
-    useMinimalActionSet: Bool = true,
-    episodicLives: Bool = true,
-    noOpReset: NoOpReset = .stochastic(minCount: 0, maxCount: 30),
-    frameSkip: FrameSkip = .stochastic(minCount: 2, maxCount: 5),
-    frameStackCount: Int = 4,
-    renderer: ImageRenderer? = nil,
-    parallelizedBatchProcessing: Bool = true
-  ) {
-    self.init(
-      using: [emulator],
-      observationsType: observationsType,
-      useMinimalActionSet: useMinimalActionSet,
-      episodicLives: episodicLives,
-      noOpReset: noOpReset,
-      frameSkip: frameSkip,
-      frameStackCount: frameStackCount,
-      renderer: renderer,
-      parallelizedBatchProcessing: parallelizedBatchProcessing)
   }
 
   public init(
@@ -130,6 +108,36 @@ public final class ArcadeEnvironment: RenderableEnvironment {
     }
   }
 
+  /// States corresponding to the underlying Atari emulators.
+  /// - Note: These states do *not* include pseudorandomness, making them suitable for planning
+  ///   purposes. In contrast, see `ArcadeEnvironment.systemStates`.
+  @inlinable
+  public var states: [[Int8]] {
+    get { emulators.map { $0.state.encoded() } }
+    set {
+      let states = newValue.map { ArcadeEmulator.State(decoding: $0) }
+      for i in 0..<batchSize {
+        emulators[i].state = states[i]
+      }
+    }
+  }
+
+  /// States corresponding to the underlying Atari emulators that are suitable for serialization.
+  /// - Note: These states include pseudorandomness, making them unsuitable for planning purposes.
+  ///   In contrast, see `ArcadeEnvironment.states`.
+  @inlinable
+  public var systemStates: State {
+    get { emulators.map { $0.systemState.encoded() } }
+    set {
+      let systemStates = newValue.map { ArcadeEmulator.State(decoding: $0) }
+      for i in 0..<batchSize {
+        emulators[i].systemState = systemStates[i]
+      }
+    }
+  }
+
+  /// Performs a step in this environment using the provided action and returns information about
+  /// the performed step.
   @inlinable
   @discardableResult
   public func step(taking action: Tensor<Int32>) -> Step<Tensor<UInt8>, Tensor<Float>> {
@@ -139,60 +147,66 @@ public final class ArcadeEnvironment: RenderableEnvironment {
     if let dispatchQueue = self.dispatchQueue {
       var steps = [Step<Tensor<UInt8>, Tensor<Float>>?](repeating: nil, count: batchSize)
       DispatchQueue.concurrentPerform(iterations: batchSize) { batchIndex in
-        if needsReset[batchIndex] {
-          dispatchQueue.sync { steps[batchIndex] = reset(batchIndex: batchIndex) }
-        }
-        let action = actionSet[Int(actions[batchIndex].scalarized())]
-        var reward = Float(0.0)
-        let stepCount = dispatchQueue.sync { frameSkip.count(rng: &rngs[batchIndex]) }
-        for _ in 0..<stepCount { reward += Float(emulators[batchIndex].act(using: action)) }
-        let gameOver = emulators[batchIndex].gameOver()
-        let lives = emulators[batchIndex].lives()
-        let lostLife = lives < currentLives[batchIndex] && lives > 0
-        let stepKind = gameOver ?
-          StepKind.last() :
-          episodicLives && lostLife ?
-            StepKind.last(withReset: false) :
-            StepKind.transition()
-        let observation = dispatchQueue.sync { currentObservation(batchIndex: batchIndex) }
-        let step = Step<Tensor<UInt8>, Tensor<Float>>(
-          kind: stepKind,
-          observation: observation,
-          reward: Tensor<Float>(Float(reward)))
-        dispatchQueue.sync {
-          steps[batchIndex] = step
-          needsReset[batchIndex] = gameOver
-          if lostLife { currentLives[batchIndex] -= 1 }
-        }
+        let step = self.step(taking: actions[batchIndex], batchIndex: batchIndex)
+        dispatchQueue.sync { steps[batchIndex] = step }
       }
       step = Step<Tensor<UInt8>, Tensor<Float>>.stack(steps.map { $0! })
       return step!
     }
 
     step = Step<Tensor<UInt8>, Tensor<Float>>.stack((0..<batchSize).map { batchIndex in
-      if needsReset[batchIndex] { return reset(batchIndex: batchIndex) }
-      let action = actionSet[Int(actions[batchIndex].scalarized())]
-      var reward = Float(0.0)
-      let stepCount = frameSkip.count(rng: &rngs[batchIndex])
-      for _ in 0..<stepCount { reward += Float(emulators[batchIndex].act(using: action)) }
-      let gameOver = emulators[batchIndex].gameOver()
-      let lives = emulators[batchIndex].lives()
-      let lostLife = lives < currentLives[batchIndex] && lives > 0
-      let stepKind = gameOver ?
-        StepKind.last() :
-        episodicLives && lostLife ?
-          StepKind.last(withReset: false) :
-          StepKind.transition()
-      needsReset[batchIndex] = gameOver
-      if lostLife { currentLives[batchIndex] -= 1 }
-      return Step<Tensor<UInt8>, Tensor<Float>>(
-        kind: stepKind,
-        observation: currentObservation(batchIndex: batchIndex),
-        reward: Tensor<Float>(Float(reward)))
+      self.step(taking: actions[batchIndex], batchIndex: batchIndex)
     })
     return step!
   }
 
+  /// Performs a step in this environment for the specified batch index, using the provided action,
+  /// and returns information about the performed step.
+  @inlinable
+  internal func step(
+    taking action: Tensor<Int32>,
+    batchIndex: Int
+  ) -> Step<Tensor<UInt8>, Tensor<Float>> {
+    if needsReset[batchIndex] { return reset(batchIndex: batchIndex) }
+    let action = actionSet[Int(actions[batchIndex].scalarized())]
+    var reward = Float(0.0)
+    let stepCount = {
+      if let d = dispatchQueue {
+        return d.sync { frameSkip.count(rng: &rngs[batchIndex]) }
+      }
+      return frameSkip.count(rng: &rngs[batchIndex])
+    }()
+    for _ in 0..<stepCount { reward += Float(emulators[batchIndex].act(using: action)) }
+    let gameOver = emulators[batchIndex].gameOver()
+    let lives = emulators[batchIndex].lives()
+    let lostLife = lives < currentLives[batchIndex] && lives > 0
+    let stepKind = gameOver ?
+      StepKind.last() :
+      episodicLives && lostLife ?
+        StepKind.last(withReset: false) :
+        StepKind.transition()
+    let observation = {
+      if let d = dispatchQueue {
+        return d.sync { currentObservation(batchIndex: batchIndex) }
+      }
+      return currentObservation(batchIndex: batchIndex)
+    }
+    if let d = dispatchQueue {
+      d.sync {
+        needsReset[batchIndex] = gameOver
+        if lostLife { currentLives[batchIndex] -= 1 }
+      }
+    } else {
+      needsReset[batchIndex] = gameOver
+      if lostLife { currentLives[batchIndex] -= 1 }
+    }
+    return Step<Tensor<UInt8>, Tensor<Float>>(
+      kind: stepKind,
+      observation: observation,
+      reward: Tensor<Float>(Float(reward)))
+  }
+
+  /// Resets this environment and returns the first step.
   @inlinable
   @discardableResult
   public func reset() -> Step<Tensor<UInt8>, Tensor<Float>> {
@@ -200,9 +214,10 @@ public final class ArcadeEnvironment: RenderableEnvironment {
     return step!
   }
 
+  /// Resets this environment for the specified batch index and returns the first step of the
+  /// resetted environment for that batch index.
   @inlinable
-  @discardableResult
-  public func reset(batchIndex: Int) -> Step<Tensor<UInt8>, Tensor<Float>> {
+  internal func reset(batchIndex: Int) -> Step<Tensor<UInt8>, Tensor<Float>> {
     emulators[batchIndex].resetGame()
     for _ in 0..<noOpReset.count(rng: &rngs[batchIndex]) {
       emulators[batchIndex].act(using: .noOp)
@@ -218,6 +233,7 @@ public final class ArcadeEnvironment: RenderableEnvironment {
       reward: Tensor<Float>(0.0))
   }
 
+  /// Returns a copy of this environment.
   @inlinable
   public func copy() -> ArcadeEnvironment {
     ArcadeEnvironment(
@@ -231,6 +247,7 @@ public final class ArcadeEnvironment: RenderableEnvironment {
       parallelizedBatchProcessing: dispatchQueue != nil)
   }
 
+  /// Renders the current state of this environment.
   @inlinable
   public func render() throws {
     if renderer == nil { renderer = ImageRenderer() }
@@ -238,6 +255,7 @@ public final class ArcadeEnvironment: RenderableEnvironment {
     try renderer!.render(emulators[0].screen(format: .rgb).array)
   }
 
+  /// Returns the current obervation from the emulator corresponding to `batchIndex`.
   @inlinable
   internal func currentObservation(batchIndex: Int) -> Tensor<UInt8> {
     var frame: Tensor<UInt8>
