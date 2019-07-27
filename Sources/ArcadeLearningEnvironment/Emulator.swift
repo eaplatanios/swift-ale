@@ -87,7 +87,7 @@ public final class ArcadeEmulator {
     gameMode: Int = 0,
     gameDifficulty: Int = 0,
     gameROMsPath: URL? = nil,
-    colorAveraging: Bool = true,
+    colorAveraging: Bool = false,
     repeatActionProbability: Float = 0.25,
     loggingMode: LoggingMode = .error,
     randomSeed: TensorFlowSeed? = nil

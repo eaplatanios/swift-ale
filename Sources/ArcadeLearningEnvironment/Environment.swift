@@ -50,6 +50,9 @@ public final class ArcadeEnvironment: RenderableEnvironment {
   /// most recent `frameStackCount` frames.
   public let frameStackCount: Int
 
+  /// Indicates whether the batched emulators are running in parallel.
+  public let parallelizedBatchProcessing: Bool
+
   public let actionSpace: Discrete
   public let observationsType: ArcadeObservationsType
   public let observationSpace: DiscreteBox<UInt8>
@@ -64,7 +67,8 @@ public final class ArcadeEnvironment: RenderableEnvironment {
 
   /// Dispatch queue used to synchronize updates on mutable shared objects when using parallelized
   /// batch processing.
-  @usableFromInline internal let dispatchQueue: DispatchQueue?
+  @usableFromInline internal let dispatchQueue: DispatchQueue =
+    DispatchQueue(label: "Arcade Learning Environment")
 
   /// Number of distinct actions that are available in the managed arcade emulators.
   public var actionCount: Int { actionSet.count }
@@ -83,11 +87,11 @@ public final class ArcadeEnvironment: RenderableEnvironment {
     noOpReset: NoOpReset = .stochastic(minCount: 0, maxCount: 30),
     frameSkip: FrameSkip = .stochastic(minCount: 2, maxCount: 5),
     frameStackCount: Int = 4,
-    renderer: ImageRenderer? = nil,
-    parallelizedBatchProcessing: Bool = true
+    parallelizedBatchProcessing: Bool = true,
+    renderer: ImageRenderer? = nil
   ) {
     precondition(emulators.count > 0, "At least one emulator must be provided.")
-    precondition(frameStackCount > 1, "The frame stack size must be at least 1.")
+    precondition(frameStackCount > 0, "The frame stack size must be at least 1.")
     precondition(
       !useMinimalActionSet || emulators.allSatisfy { $0.game == emulators.first!.game },
       "If `useMinimalActionSet` is set, all provided emulators must be emulating the same game.")
@@ -98,10 +102,8 @@ public final class ArcadeEnvironment: RenderableEnvironment {
     self.noOpReset = noOpReset
     self.frameSkip = frameSkip
     self.frameStackCount = frameStackCount
+    self.parallelizedBatchProcessing = parallelizedBatchProcessing
     self.renderer = renderer
-    self.dispatchQueue = parallelizedBatchProcessing && emulators.count > 1 ?
-      DispatchQueue(label: "Arcade Learning Environment") :
-      nil
     self.actionSet = useMinimalActionSet ?
         emulators[0].minimalActions :
         emulators[0].legalActions
@@ -119,7 +121,9 @@ public final class ArcadeEnvironment: RenderableEnvironment {
         lowerBound: 0,
         upperBound: 255)
     }
-    self.frameStacks = [FrameStack](repeating: FrameStack(size: frameStackCount), count: batchSize)
+    self.frameStacks = frameStackCount > 1 ?
+      [FrameStack](repeating: FrameStack(size: frameStackCount), count: batchSize) :
+      [FrameStack]()
     self.needsReset = [Bool](repeating: true, count: batchSize)
     self.currentLives = emulators.map { $0.lives }
     self.rngs = (0..<batchSize).map { _ in
@@ -164,7 +168,7 @@ public final class ArcadeEnvironment: RenderableEnvironment {
     let actions = action.unstacked()
 
     // Check if we need to use the parallelized version.
-    if let dispatchQueue = self.dispatchQueue {
+    if parallelizedBatchProcessing {
       var steps = [Step<Tensor<UInt8>, Tensor<Float>>?](repeating: nil, count: batchSize)
       DispatchQueue.concurrentPerform(iterations: batchSize) { batchIndex in
         let step = self.step(taking: actions[batchIndex], batchIndex: batchIndex)
@@ -189,14 +193,16 @@ public final class ArcadeEnvironment: RenderableEnvironment {
   ) -> Step<Tensor<UInt8>, Tensor<Float>> {
     if needsReset[batchIndex] { return reset(batchIndex: batchIndex) }
     let action = actionSet[Int(action.scalarized())]
+    let stepCount = dispatchQueue.sync { frameSkip.count(rng: &rngs[batchIndex]) }
     var reward = Float(0.0)
-    let stepCount = { () -> Int in
-      if let d = self.dispatchQueue {
-        return d.sync { frameSkip.count(rng: &rngs[batchIndex]) }
-      }
-      return frameSkip.count(rng: &rngs[batchIndex])
-    }()
-    for _ in 0..<stepCount { reward += Float(emulators[batchIndex].act(using: action)) }
+    var observations = [Tensor<UInt8>]()
+    for _ in 0..<stepCount {
+      reward += Float(emulators[batchIndex].act(using: action))
+      observations.append(currentObservation(batchIndex: batchIndex))
+    }
+    let observation = stepCount > 1 ?
+      Tensor<UInt8>(stacking: observations, alongAxis: -1).max(squeezingAxes: -1) :
+      observations[0]
     let gameOver = emulators[batchIndex].gameOver
     let lives = emulators[batchIndex].lives
     let lostLife = lives < currentLives[batchIndex] && lives > 0
@@ -205,18 +211,7 @@ public final class ArcadeEnvironment: RenderableEnvironment {
       episodicLives && lostLife ?
         StepKind.last(withReset: false) :
         StepKind.transition()
-    let observation = { () -> Tensor<UInt8> in
-      if let d = self.dispatchQueue {
-        return d.sync { self.currentObservation(batchIndex: batchIndex) }
-      }
-      return currentObservation(batchIndex: batchIndex)
-    }()
-    if let d = dispatchQueue {
-      d.sync {
-        needsReset[batchIndex] = gameOver
-        if lostLife { currentLives[batchIndex] -= 1 }
-      }
-    } else {
+    dispatchQueue.sync {
       needsReset[batchIndex] = gameOver
       if lostLife { currentLives[batchIndex] -= 1 }
     }
@@ -263,8 +258,8 @@ public final class ArcadeEnvironment: RenderableEnvironment {
       episodicLives: episodicLives,
       frameSkip: frameSkip,
       frameStackCount: frameStackCount,
-      renderer: renderer,
-      parallelizedBatchProcessing: dispatchQueue != nil)
+      parallelizedBatchProcessing: parallelizedBatchProcessing,
+      renderer: renderer)
   }
 
   /// Renders the current state of this environment.
@@ -278,20 +273,24 @@ public final class ArcadeEnvironment: RenderableEnvironment {
   /// Returns the current obervation from the emulator corresponding to `batchIndex`.
   @inlinable
   internal func currentObservation(batchIndex: Int) -> Tensor<UInt8> {
+    let emulator = dispatchQueue.sync { emulators[batchIndex] }
     var frame: ShapedArray<UInt8>
     switch observationsType {
     case let .screen(height, width, format):
-      let emulatorScreen = emulators[batchIndex].screen(format: format)
+      let emulatorScreen = emulator.screen(format: format)
       frame = resize(
         images: Tensor(emulatorScreen),
         to: Tensor<Int32>([Int32(height), Int32(width)]),
         method: .area).array
     case .memory:
-      frame = ShapedArray(emulators[batchIndex].memory())
+      frame = ShapedArray(emulator.memory())
     }
-    frameStacks[batchIndex].push(frame)
-    let frames = frameStacks[batchIndex].frames().map(Tensor.init)
-    return Tensor<UInt8>(concatenating: frames, alongAxis: -1)
+    if frameStacks.count > 0 {
+      dispatchQueue.sync { frameStacks[batchIndex].push(frame) }
+      let frames = frameStacks[batchIndex].frames().map(Tensor.init)
+      return Tensor<UInt8>(concatenating: frames, alongAxis: -1)
+    }
+    return Tensor<UInt8>(frame)
   }
 }
 

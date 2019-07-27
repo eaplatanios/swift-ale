@@ -67,7 +67,6 @@ struct ArcadeActorCritic: Network {
     let hidden = relu(denseHidden(conv3))
     let actionLogits = denseAction(hidden)
     let flattenedValue = denseValue(hidden)
-    // print(flattenedValue)
     let flattenedActionDistribution = Categorical<Int32>(logits: actionLogits)
     return ActorCriticOutput(
       actionDistribution: flattenedActionDistribution.unflattenedBatch(outerDims: outerDims),
@@ -77,7 +76,7 @@ struct ArcadeActorCritic: Network {
 
 let logger = Logger(label: "Breakout PPO")
 
-let batchSize = 6
+let batchSize = 32
 let emulators = (0..<batchSize).map { _ in ArcadeEmulator(game: .breakout) }
 let arcadeEnvironment = ArcadeEnvironment(
   using: emulators,
@@ -87,7 +86,7 @@ let arcadeEnvironment = ArcadeEnvironment(
   noOpReset: .stochastic(minCount: 0, maxCount: 30),
   frameSkip: .constant(4),
   frameStackCount: 4,
-  parallelizedBatchProcessing: false)
+  parallelizedBatchProcessing: true)
 let averageEpisodeReward = AverageEpisodeReward(for: arcadeEnvironment, bufferSize: 100)
 let environment = EnvironmentCallbackWrapper(
   arcadeEnvironment,
@@ -116,7 +115,7 @@ for step in 0..<1000000 {
     maxSteps: 128 * batchSize,
     maxEpisodes: 10000 * batchSize,
     stepCallbacks: [{ (environment, trajectory) in
-      // if step > 0 { try! environment.render() }
+      if step > 0 { try! environment.render() }
     }])
   if step % 1 == 0 {
     logger.info("Step \(step) | Loss: \(loss) | Average Episode Reward: \(averageEpisodeReward.value())")
