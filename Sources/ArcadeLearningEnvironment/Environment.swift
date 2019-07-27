@@ -126,7 +126,7 @@ public final class ArcadeEnvironment: RenderableEnvironment {
   /// - Note: These states include pseudorandomness, making them unsuitable for planning purposes.
   ///   In contrast, see `ArcadeEnvironment.states`.
   @inlinable
-  public var systemStates: State {
+  public var systemStates: [[Int8]] {
     get { emulators.map { $0.systemState.encoded() } }
     set {
       let systemStates = newValue.map { ArcadeEmulator.State(decoding: $0) }
@@ -168,10 +168,10 @@ public final class ArcadeEnvironment: RenderableEnvironment {
     batchIndex: Int
   ) -> Step<Tensor<UInt8>, Tensor<Float>> {
     if needsReset[batchIndex] { return reset(batchIndex: batchIndex) }
-    let action = actionSet[Int(actions[batchIndex].scalarized())]
+    let action = actionSet[Int(action.scalarized())]
     var reward = Float(0.0)
-    let stepCount = {
-      if let d = dispatchQueue {
+    let stepCount = { () -> Int in
+      if let d = self.dispatchQueue {
         return d.sync { frameSkip.count(rng: &rngs[batchIndex]) }
       }
       return frameSkip.count(rng: &rngs[batchIndex])
@@ -185,12 +185,12 @@ public final class ArcadeEnvironment: RenderableEnvironment {
       episodicLives && lostLife ?
         StepKind.last(withReset: false) :
         StepKind.transition()
-    let observation = {
-      if let d = dispatchQueue {
-        return d.sync { currentObservation(batchIndex: batchIndex) }
+    let observation = { () -> Tensor<UInt8> in
+      if let d = self.dispatchQueue {
+        return d.sync { self.currentObservation(batchIndex: batchIndex) }
       }
       return currentObservation(batchIndex: batchIndex)
-    }
+    }()
     if let d = dispatchQueue {
       d.sync {
         needsReset[batchIndex] = gameOver
