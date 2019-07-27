@@ -11,20 +11,11 @@
         }
       },
       {
-        "package": "NELFramework",
-        "repositoryURL": "https://github.com/eaplatanios/nel_framework.git",
-        "state": {
-          "branch": "master",
-          "revision": "85a89828575eb04c4c8d2a80db5ad0f398003bda",
-          "version": null
-        }
-      },
-      {
         "package": "Retro",
         "repositoryURL": "https://github.com/eaplatanios/retro-swift.git",
         "state": {
           "branch": "master",
-          "revision": "094de304d9a89b89128517c1e6a05051cbf51f20",
+          "revision": "52d09b60e3c1d675e38268ca72e848c748dfa90b",
           "version": null
         }
       },

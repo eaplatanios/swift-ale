@@ -16,7 +16,7 @@ import Foundation
 import ReinforcementLearning
 import TensorFlow
 
-/// Represents different settings for the observation space of the environment.
+/// Observations type for arcade environments.
 public enum ArcadeObservationsType {
   /// Use RGB image observations.
   case screen(height: Int, width: Int, format: ArcadeEmulator.ScreenFormat)
@@ -25,14 +25,31 @@ public enum ArcadeObservationsType {
   case memory
 }
 
+/// Atari game environment.
 public final class ArcadeEnvironment: RenderableEnvironment {
+  /// Batch size of this environment.
   public let batchSize: Int
+
+  /// Arcade emulators used by this environment for Atari game emulation.
   public let emulators: [ArcadeEmulator]
+
+  /// Indicates whether to use the minimal valid action set instead of the full Atari action set.
   public let useMinimalActionSet: Bool
+
+  /// Indicates whether loss of life in a game corresponds to an episode ending. If `false`, game
+  /// over corresponds to an episode ending, which may involve multiple lost lives.
   public let episodicLives: Bool
+
+  /// No-op reset configuration used when resetting each game.
   public let noOpReset: NoOpReset
+
+  /// Frame skipping strategy used for each simulation step.
   public let frameSkip: FrameSkip
+
+  /// Number of frames that are stacked to form each observation. The stacked frames are always the
+  /// most recent `frameStackCount` frames.
   public let frameStackCount: Int
+
   public let actionSpace: Discrete
   public let observationsType: ArcadeObservationsType
   public let observationSpace: DiscreteBox<UInt8>
@@ -61,7 +78,7 @@ public final class ArcadeEnvironment: RenderableEnvironment {
   public init(
     using emulators: [ArcadeEmulator],
     observationsType: ArcadeObservationsType = .screen(height: 84, width: 84, format: .grayscale),
-    useMinimalActionSet: Bool = true,
+    useMinimalActionSet: Bool = false,
     episodicLives: Bool = true,
     noOpReset: NoOpReset = .stochastic(minCount: 0, maxCount: 30),
     frameSkip: FrameSkip = .stochastic(minCount: 2, maxCount: 5),
@@ -71,6 +88,9 @@ public final class ArcadeEnvironment: RenderableEnvironment {
   ) {
     precondition(emulators.count > 0, "At least one emulator must be provided.")
     precondition(frameStackCount > 1, "The frame stack size must be at least 1.")
+    precondition(
+      !useMinimalActionSet || emulators.allSatisfy { $0.game == emulators.first!.game },
+      "If `useMinimalActionSet` is set, all provided emulators must be emulating the same game.")
     self.batchSize = emulators.count
     self.emulators = emulators
     self.useMinimalActionSet = useMinimalActionSet
@@ -275,11 +295,19 @@ public final class ArcadeEnvironment: RenderableEnvironment {
 }
 
 extension ArcadeEnvironment {
+  /// No-op reset configuration used when resetting each game.
   public enum NoOpReset {
+    /// No no-op actions are performed.
     case none
+
+    /// A fixed number of `count` no-op actions are performed after each game reset.
     case constant(_ count: Int)
+
+    /// A random number of between `minCount` and `maxCount` no-op actions are performed after
+    /// each game reset.
     case stochastic(minCount: Int, maxCount: Int)
 
+    /// Returns the number of no-op actions to take after resetting a game.
     @inlinable
     internal func count<G: RandomNumberGenerator>(rng: inout G) -> Int {
       switch self {
@@ -290,11 +318,21 @@ extension ArcadeEnvironment {
     }
   }
 
+  /// Frame skipping strategy used for each simulation step.
   public enum FrameSkip {
+    /// No frame skipping is performed.
     case none
+
+    /// A fixed number of `count` frames are skipped after each environment step. Frame skipping is
+    /// performed by repeating the same action a specified number of times.
     case constant(_ count: Int)
+
+    /// A random number of between `minCount` and `maxCount` frames are skipped after each
+    /// environment step. Frame skipping is performed by repeating the same action a specified
+    /// number of times.
     case stochastic(minCount: Int, maxCount: Int)
 
+    /// Returns the number of frames to skip after each simulation step.
     @inlinable
     internal func count<G: RandomNumberGenerator>(rng: inout G) -> Int {
       switch self {
