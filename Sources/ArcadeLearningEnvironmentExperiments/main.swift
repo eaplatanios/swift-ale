@@ -78,11 +78,7 @@ struct ArcadeActorCritic: Network {
 let logger = Logger(label: "Breakout PPO")
 
 let batchSize = 6
-let emulators = (0..<batchSize).map { _ -> ArcadeEmulator in
-  let emulator = ArcadeEmulator()
-  try! emulator.loadGame(.breakout)
-  return emulator
-}
+let emulators = (0..<batchSize).map { _ in ArcadeEmulator(game: .breakout) }
 let arcadeEnvironment = ArcadeEnvironment(
   using: emulators,
   observationsType: .screen(height: 84, width: 84, format: .grayscale),

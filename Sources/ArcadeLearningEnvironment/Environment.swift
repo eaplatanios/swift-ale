@@ -103,14 +103,14 @@ public final class ArcadeEnvironment: RenderableEnvironment {
       DispatchQueue(label: "Arcade Learning Environment") :
       nil
     self.actionSet = useMinimalActionSet ?
-        emulators[0].minimalActions() :
-        emulators[0].legalActions()
+        emulators[0].minimalActions :
+        emulators[0].legalActions
     self.actionSpace = Discrete(withSize: actionSet.count, batchSize: batchSize)
     self.observationsType = observationsType
     switch observationsType {
     case let .screen(height, width, format):
       self.observationSpace = DiscreteBox<UInt8>(
-        shape: format.shape(height: height, width: width),
+        shape: TensorShape(format.shape(height: height, width: width)),
         lowerBound: 0,
         upperBound: 255)
     case .memory:
@@ -121,7 +121,7 @@ public final class ArcadeEnvironment: RenderableEnvironment {
     }
     self.frameStacks = [FrameStack](repeating: FrameStack(size: frameStackCount), count: batchSize)
     self.needsReset = [Bool](repeating: true, count: batchSize)
-    self.currentLives = emulators.map { $0.lives() }
+    self.currentLives = emulators.map { $0.lives }
     self.rngs = (0..<batchSize).map { _ in
       let seed = Context.local.randomSeed
       return PhiloxRandomNumberGenerator(seed: Int(seed.graph &+ seed.op))
@@ -197,8 +197,8 @@ public final class ArcadeEnvironment: RenderableEnvironment {
       return frameSkip.count(rng: &rngs[batchIndex])
     }()
     for _ in 0..<stepCount { reward += Float(emulators[batchIndex].act(using: action)) }
-    let gameOver = emulators[batchIndex].gameOver()
-    let lives = emulators[batchIndex].lives()
+    let gameOver = emulators[batchIndex].gameOver
+    let lives = emulators[batchIndex].lives
     let lostLife = lives < currentLives[batchIndex] && lives > 0
     let stepKind = gameOver ?
       StepKind.last() :
@@ -241,12 +241,12 @@ public final class ArcadeEnvironment: RenderableEnvironment {
     emulators[batchIndex].resetGame()
     for _ in 0..<noOpReset.count(rng: &rngs[batchIndex]) {
       emulators[batchIndex].act(using: .noOp)
-      if emulators[batchIndex].gameOver() {
+      if emulators[batchIndex].gameOver {
         emulators[batchIndex].resetGame()
       }
     }
     needsReset[batchIndex] = false
-    currentLives[batchIndex] = emulators[batchIndex].lives()
+    currentLives[batchIndex] = emulators[batchIndex].lives
     return Step<Tensor<UInt8>, Tensor<Float>>(
       kind: .first(),
       observation: currentObservation(batchIndex: batchIndex),
@@ -272,25 +272,26 @@ public final class ArcadeEnvironment: RenderableEnvironment {
   public func render() throws {
     if renderer == nil { renderer = ImageRenderer() }
     // TODO: Better support batchSize > 1.
-    try renderer!.render(emulators[0].screen(format: .rgb).array)
+    try renderer!.render(emulators[0].screen(format: .rgb))
   }
 
   /// Returns the current obervation from the emulator corresponding to `batchIndex`.
   @inlinable
   internal func currentObservation(batchIndex: Int) -> Tensor<UInt8> {
-    var frame: Tensor<UInt8>
+    var frame: ShapedArray<UInt8>
     switch observationsType {
     case let .screen(height, width, format):
       let emulatorScreen = emulators[batchIndex].screen(format: format)
       frame = resize(
-        images: emulatorScreen,
+        images: Tensor(emulatorScreen),
         to: Tensor<Int32>([Int32(height), Int32(width)]),
-        method: .area)
+        method: .area).array
     case .memory:
-      frame = emulators[batchIndex].memory()
+      frame = ShapedArray(emulators[batchIndex].memory())
     }
     frameStacks[batchIndex].push(frame)
-    return Tensor<UInt8>(concatenating: frameStacks[batchIndex].frames(), alongAxis: -1)
+    let frames = frameStacks[batchIndex].frames().map(Tensor.init)
+    return Tensor<UInt8>(concatenating: frames, alongAxis: -1)
   }
 }
 
@@ -343,21 +344,22 @@ extension ArcadeEnvironment {
     }
   }
 
-  // TODO: Find a way to make this "replay-buffer-friendly" so that it doesn't store duplicate
-  // copies of each frame.
-  public struct FrameStack {
-    public let size: Int
-
+  @usableFromInline
+  internal struct FrameStack {
+    @usableFromInline internal let size: Int
     @usableFromInline internal var index: Int = 0
-    @usableFromInline internal var buffer: [Tensor<UInt8>] = []
+    @usableFromInline internal var buffer: [ShapedArray<UInt8>] = []
+
+    // TODO: Find a way to make this "replay-buffer-friendly" so that it doesn't store duplicate
+    // copies of each frame.
 
     @inlinable
-    public init(size: Int) {
+    internal init(size: Int) {
       self.size = size
     }
 
     @inlinable
-    public mutating func push(_ frame: Tensor<UInt8>) {
+    internal mutating func push(_ frame: ShapedArray<UInt8>) {
       if buffer.count == size {
         buffer[index] = frame
       } else {
@@ -367,13 +369,13 @@ extension ArcadeEnvironment {
     }
 
     @inlinable
-    public func frames() -> [Tensor<UInt8>] {
+    internal func frames() -> [ShapedArray<UInt8>] {
       if buffer.count == size {
         if index == 0 { return buffer }
-        return [Tensor<UInt8>](buffer[(index - 1)...] + buffer[..<(index - 1)])
+        return [ShapedArray<UInt8>](buffer[(index - 1)...] + buffer[..<(index - 1)])
       } else {
-        return [Tensor<UInt8>](
-          [Tensor<UInt8>](repeating: buffer[0], count: size - index) + buffer[0..<index])
+        return [ShapedArray<UInt8>](
+          [ShapedArray<UInt8>](repeating: buffer[0], count: size - index) + buffer[0..<index])
       }
     }
   }
