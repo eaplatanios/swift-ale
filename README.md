@@ -36,6 +36,11 @@ that `pkg-config` is configured correctly. That may require
 you to set the `PKG_CONFIG_PATH` environment variable
 correctly.
 
+**NOTE:** If the rendered image does not update according 
+to the specified frames per second value and you are using 
+MacOS 10.14, you should update to 10.14.4 because there is 
+a bug in previous releases of 10.14 which breaks VSync.
+
 ## Supported Games
 
 `ArcadeLearningEnvironment` will attempt to download the

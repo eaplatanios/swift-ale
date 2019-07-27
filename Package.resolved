@@ -2,24 +2,6 @@
   "object": {
     "pins": [
       {
-        "package": "Gzip",
-        "repositoryURL": "https://github.com/1024jp/GzipSwift.git",
-        "state": {
-          "branch": null,
-          "revision": "eac1da34ec837f501b56d810bdf0fd68b3f91e19",
-          "version": "4.1.0"
-        }
-      },
-      {
-        "package": "Retro",
-        "repositoryURL": "https://github.com/eaplatanios/retro-swift.git",
-        "state": {
-          "branch": "master",
-          "revision": "52d09b60e3c1d675e38268ca72e848c748dfa90b",
-          "version": null
-        }
-      },
-      {
         "package": "swift-log",
         "repositoryURL": "https://github.com/apple/swift-log.git",
         "state": {
@@ -29,11 +11,11 @@
         }
       },
       {
-        "package": "ZIPFoundation",
-        "repositoryURL": "https://github.com/weichsel/ZIPFoundation.git",
+        "package": "ReinforcementLearning",
+        "repositoryURL": "https://github.com/eaplatanios/swift-rl.git",
         "state": {
           "branch": "master",
-          "revision": "edbeaa39b426e54702194b0a601342322f01e400",
+          "revision": "fabb890d6848da5c6a49bd21fba18aa1c5d44538",
           "version": null
         }
       }
