@@ -17,9 +17,7 @@ import Logging
 import ReinforcementLearning
 import TensorFlow
 
-struct ArcadeActorCritic: Network {
-  @noDerivative public var state: None = None()
-
+struct ArcadeActorCritic: Module {
   public var conv1: Conv2D<Float> = Conv2D<Float>(
     filterShape: (8, 8, 4, 32),
     strides: (4, 4),
@@ -45,16 +43,6 @@ struct ArcadeActorCritic: Network {
     outputSize: 1,
     weightInitializer: orthogonal(gain: Tensor<Float>(1.0)))
 
-  public init() {}
-
-  public init(copying other: ArcadeActorCritic) {
-    conv1 = other.conv1
-    conv2 = other.conv2
-    denseHidden = other.denseHidden
-    denseAction = other.denseAction
-    denseValue = other.denseValue
-  }
-
   @differentiable
   public func callAsFunction(_ input: Tensor<UInt8>) -> ActorCriticOutput<Categorical<Int32>> {
     let input = Tensor<Float>(input) / 255.0
@@ -76,7 +64,7 @@ struct ArcadeActorCritic: Network {
 
 let logger = Logger(label: "Breakout PPO")
 
-let batchSize = 32
+let batchSize = 6
 let emulators = (0..<batchSize).map { _ in ArcadeEmulator(game: .breakout) }
 let arcadeEnvironment = ArcadeEnvironment(
   using: emulators,
@@ -92,30 +80,30 @@ let environment = EnvironmentCallbackWrapper(
   arcadeEnvironment,
   callbacks: averageEpisodeReward.updater())
 
-print("Number of valid actions: \(arcadeEnvironment.actionCount)")
+logger.info("Number of valid actions: \(arcadeEnvironment.actionCount)")
 
 let network = ArcadeActorCritic()
 var agent = PPOAgent(
   for: environment,
   network: network,
   optimizer: AMSGrad(for: network),
-  learningRateSchedule: LinearLearningRateSchedule(initialValue: 2.5e-4, slope: -2.5e-4 / 5208.0),
+  learningRateSchedule: LinearLearningRateSchedule(initialValue: 2.5e-4, slope: -2.5e-4 / 6500.0),
   maxGradientNorm: 0.5,
   advantageFunction: GeneralizedAdvantageEstimation(discountFactor: 0.99, discountWeight: 0.95),
-  normalizeAdvantages: true,
+  advantagesNormalizer: TensorNormalizer<Float>(streaming: false, alongAxes: 0, 1),
   useTDLambdaReturn: true,
   clip: PPOClip(epsilon: 0.1),
   penalty: PPOPenalty(klCutoffFactor: 0.5),
   valueEstimationLoss: PPOValueEstimationLoss(weight: 0.5, clipThreshold: 0.1),
   entropyRegularization: PPOEntropyRegularization(weight: 0.01),
-  iterationCountPerUpdate: 1)
-for step in 0..<1000000 {
+  iterationCountPerUpdate: 4)
+for step in 0..<6500 {
   let loss = agent.update(
     using: environment,
     maxSteps: 128 * batchSize,
     maxEpisodes: 10000 * batchSize,
     stepCallbacks: [{ (environment, trajectory) in
-      if step > 0 { try! environment.render() }
+      // if step > 0 { try! environment.render() }
     }])
   if step % 1 == 0 {
     logger.info("Step \(step) | Loss: \(loss) | Average Episode Reward: \(averageEpisodeReward.value())")
