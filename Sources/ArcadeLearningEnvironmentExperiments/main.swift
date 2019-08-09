@@ -86,24 +86,24 @@ let network = ArcadeActorCritic()
 var agent = PPOAgent(
   for: environment,
   network: network,
-  optimizer: AMSGrad(for: network),
-  learningRateSchedule: LinearLearningRateSchedule(initialValue: 2.5e-4, slope: -2.5e-4 / 6500.0),
+  optimizer: AMSGrad(for: network, learningRate: 1e-3),
+  learningRateSchedule: ExponentialLearningRateDecay(decayRate: 0.99, decayStepCount: 3),
   maxGradientNorm: 0.5,
   advantageFunction: GeneralizedAdvantageEstimation(discountFactor: 0.99, discountWeight: 0.95),
-  advantagesNormalizer: TensorNormalizer<Float>(streaming: false, alongAxes: 0, 1),
+  advantagesNormalizer: TensorNormalizer<Float>(streaming: true, alongAxes: 0, 1),
   useTDLambdaReturn: true,
   clip: PPOClip(epsilon: 0.1),
-  penalty: PPOPenalty(klCutoffFactor: 0.5),
-  valueEstimationLoss: PPOValueEstimationLoss(weight: 0.5, clipThreshold: 0.1),
+  penalty: nil, // PPOPenalty(klCutoffFactor: 0.5),
+  valueEstimationLoss: PPOValueEstimationLoss(weight: 1.0, clipThreshold: nil),
   entropyRegularization: PPOEntropyRegularization(weight: 0.01),
-  iterationCountPerUpdate: 4)
+  iterationCountPerUpdate: 1)
 for step in 0..<6500 {
   let loss = agent.update(
     using: environment,
-    maxSteps: 128 * batchSize,
-    maxEpisodes: 10000 * batchSize,
+    maxSteps: 1024 * batchSize,
+    maxEpisodes: 1024 * batchSize,
     stepCallbacks: [{ (environment, trajectory) in
-      // if step > 0 { try! environment.render() }
+      if step > 0 { try! environment.render() }
     }])
   if step % 1 == 0 {
     logger.info("Step \(step) | Loss: \(loss) | Average Episode Reward: \(averageEpisodeReward.value())")
