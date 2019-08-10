@@ -30,7 +30,7 @@ let package = Package(
       path: "Sources/ArcadeLearningEnvironment"),
     .target(
       name: "ArcadeLearningEnvironmentExperiments",
-      dependencies: ["ArcadeLearningEnvironment", "Logging"],
+      dependencies: ["ArcadeLearningEnvironment", "Logging", "ReinforcementLearning"],
       path: "Sources/ArcadeLearningEnvironmentExperiments"),
   ]
 )

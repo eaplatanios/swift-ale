@@ -17,48 +17,75 @@ import Logging
 import ReinforcementLearning
 import TensorFlow
 
+// _RuntimeConfig.useLazyTensor = true
+
 struct ArcadeActorCritic: Module {
-  public var conv1: Conv2D<Float> = Conv2D<Float>(
+  public var actionConv1: Conv2D<Float> = Conv2D<Float>(
     filterShape: (8, 8, 4, 32),
     strides: (4, 4),
     filterInitializer: orthogonal(gain: Tensor<Float>(sqrt(2.0))))
-  public var conv2: Conv2D<Float> = Conv2D<Float>(
+  public var actionConv2: Conv2D<Float> = Conv2D<Float>(
     filterShape: (4, 4, 32, 64),
     strides: (2, 2),
     filterInitializer: orthogonal(gain: Tensor<Float>(sqrt(2.0))))
-  public var conv3: Conv2D<Float> = Conv2D<Float>(
+  public var actionConv3: Conv2D<Float> = Conv2D<Float>(
     filterShape: (3, 3, 64, 64),
     strides: (1, 1),
     filterInitializer: orthogonal(gain: Tensor<Float>(sqrt(2.0))))
-  public var denseHidden: Dense<Float> = Dense<Float>(
+  public var actionDenseHidden: Dense<Float> = Dense<Float>(
     inputSize: 3136,
     outputSize: 512,
     weightInitializer: orthogonal(gain: Tensor<Float>(sqrt(2.0))))
-  public var denseAction: Dense<Float> = Dense<Float>(
+  public var actionDenseOutput: Dense<Float> = Dense<Float>(
     inputSize: 512,
     outputSize: 4,
     weightInitializer: orthogonal(gain: Tensor<Float>(0.01))) // TODO: Easy way to get the number of actions.
-  public var denseValue: Dense<Float> = Dense<Float>(
+
+  public var valueConv1: Conv2D<Float> = Conv2D<Float>(
+    filterShape: (8, 8, 4, 32),
+    strides: (4, 4),
+    filterInitializer: orthogonal(gain: Tensor<Float>(sqrt(2.0))))
+  public var valueConv2: Conv2D<Float> = Conv2D<Float>(
+    filterShape: (4, 4, 32, 64),
+    strides: (2, 2),
+    filterInitializer: orthogonal(gain: Tensor<Float>(sqrt(2.0))))
+  public var valueConv3: Conv2D<Float> = Conv2D<Float>(
+    filterShape: (3, 3, 64, 64),
+    strides: (1, 1),
+    filterInitializer: orthogonal(gain: Tensor<Float>(sqrt(2.0))))
+  public var valueDenseHidden: Dense<Float> = Dense<Float>(
+    inputSize: 3136,
+    outputSize: 512,
+    weightInitializer: orthogonal(gain: Tensor<Float>(sqrt(2.0))))
+  public var valueDenseOutput: Dense<Float> = Dense<Float>(
     inputSize: 512,
     outputSize: 1,
     weightInitializer: orthogonal(gain: Tensor<Float>(1.0)))
 
   @differentiable
   public func callAsFunction(_ input: Tensor<UInt8>) -> ActorCriticOutput<Categorical<Int32>> {
-    let input = Tensor<Float>(input) / 255.0
     let outerDimCount = input.rank - 3
     let outerDims = [Int](input.shape.dimensions[0..<outerDimCount])
-    let flattenedBatchInput = input.flattenedBatch(outerDimCount: outerDimCount)
-    let conv1 = relu(self.conv1(flattenedBatchInput))
-    let conv2 = relu(self.conv2(conv1))
-    let conv3 = relu(self.conv3(conv2)).reshaped(to: [-1, 3136])
-    let hidden = relu(denseHidden(conv3))
-    let actionLogits = denseAction(hidden)
-    let flattenedValue = denseValue(hidden)
-    let flattenedActionDistribution = Categorical<Int32>(logits: actionLogits)
+    let input = Tensor<Float>(input.flattenedBatch(outerDimCount: outerDimCount)) / 255.0
+
+    // Policy Network.
+    let actionConv1 = relu(self.actionConv1(input))
+    let actionConv2 = relu(self.actionConv2(actionConv1))
+    let actionConv3 = relu(self.actionConv3(actionConv2)).reshaped(to: [-1, 3136])
+    let actionHidden = relu(actionDenseHidden(actionConv3))
+    let actionLogits = actionDenseOutput(actionHidden)
+    let actionDistribution = Categorical<Int32>(logits: actionLogits)
+
+    // Value Network.
+    let valueConv1 = relu(self.valueConv1(input))
+    let valueConv2 = relu(self.valueConv2(valueConv1))
+    let valueConv3 = relu(self.valueConv3(valueConv2)).reshaped(to: [-1, 3136])
+    let valueHidden = relu(valueDenseHidden(valueConv3))
+    let value = valueDenseOutput(valueHidden)
+
     return ActorCriticOutput(
-      actionDistribution: flattenedActionDistribution.unflattenedBatch(outerDims: outerDims),
-      value: flattenedValue.unflattenedBatch(outerDims: outerDims).squeezingShape(at: -1))
+      actionDistribution: actionDistribution.unflattenedBatch(outerDims: outerDims),
+      value: value.unflattenedBatch(outerDims: outerDims).squeezingShape(at: -1))
   }
 }
 
@@ -83,27 +110,27 @@ let environment = EnvironmentCallbackWrapper(
 logger.info("Number of valid actions: \(arcadeEnvironment.actionCount)")
 
 let network = ArcadeActorCritic()
-var agent = PPOAgent(
+var agent = PPOAgent1(
   for: environment,
   network: network,
-  optimizer: AMSGrad(for: network, learningRate: 1e-3),
+  optimizer: AMSGrad(for: network, learningRate: 2.5e-4),
   learningRateSchedule: ExponentialLearningRateDecay(decayRate: 0.99, decayStepCount: 3),
   maxGradientNorm: 0.5,
   advantageFunction: GeneralizedAdvantageEstimation(discountFactor: 0.99, discountWeight: 0.95),
   advantagesNormalizer: TensorNormalizer<Float>(streaming: true, alongAxes: 0, 1),
   useTDLambdaReturn: true,
   clip: PPOClip(epsilon: 0.1),
-  penalty: nil, // PPOPenalty(klCutoffFactor: 0.5),
-  valueEstimationLoss: PPOValueEstimationLoss(weight: 1.0, clipThreshold: nil),
+  penalty: PPOPenalty(klCutoffFactor: 0.5),
+  valueEstimationLoss: PPOValueEstimationLoss(weight: 0.5, clipThreshold: nil),
   entropyRegularization: PPOEntropyRegularization(weight: 0.01),
-  iterationCountPerUpdate: 1)
+  iterationCountPerUpdate: 4)
 for step in 0..<6500 {
   let loss = agent.update(
     using: environment,
-    maxSteps: 1024 * batchSize,
-    maxEpisodes: 1024 * batchSize,
+    maxSteps: 128 * batchSize,
+    maxEpisodes: 128 * batchSize,
     stepCallbacks: [{ (environment, trajectory) in
-      if step > 0 { try! environment.render() }
+      // if step > 0 { try! environment.render() }
     }])
   if step % 1 == 0 {
     logger.info("Step \(step) | Loss: \(loss) | Average Episode Reward: \(averageEpisodeReward.value())")
