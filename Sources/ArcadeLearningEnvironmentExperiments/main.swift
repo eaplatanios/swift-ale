@@ -20,44 +20,27 @@ import TensorFlow
 // _RuntimeConfig.useLazyTensor = true
 
 struct ArcadeActorCritic: Module {
-  public var actionConv1: Conv2D<Float> = Conv2D<Float>(
+  public var conv1: Conv2D<Float> = Conv2D<Float>(
     filterShape: (8, 8, 4, 32),
     strides: (4, 4),
     filterInitializer: orthogonal(gain: Tensor<Float>(sqrt(2.0))))
-  public var actionConv2: Conv2D<Float> = Conv2D<Float>(
+  public var conv2: Conv2D<Float> = Conv2D<Float>(
     filterShape: (4, 4, 32, 64),
     strides: (2, 2),
     filterInitializer: orthogonal(gain: Tensor<Float>(sqrt(2.0))))
-  public var actionConv3: Conv2D<Float> = Conv2D<Float>(
+  public var conv3: Conv2D<Float> = Conv2D<Float>(
     filterShape: (3, 3, 64, 64),
     strides: (1, 1),
     filterInitializer: orthogonal(gain: Tensor<Float>(sqrt(2.0))))
-  public var actionDenseHidden: Dense<Float> = Dense<Float>(
+  public var denseHidden: Dense<Float> = Dense<Float>(
     inputSize: 3136,
     outputSize: 512,
     weightInitializer: orthogonal(gain: Tensor<Float>(sqrt(2.0))))
-  public var actionDenseOutput: Dense<Float> = Dense<Float>(
+  public var denseAction: Dense<Float> = Dense<Float>(
     inputSize: 512,
     outputSize: 4,
     weightInitializer: orthogonal(gain: Tensor<Float>(0.01))) // TODO: Easy way to get the number of actions.
-
-  public var valueConv1: Conv2D<Float> = Conv2D<Float>(
-    filterShape: (8, 8, 4, 32),
-    strides: (4, 4),
-    filterInitializer: orthogonal(gain: Tensor<Float>(sqrt(2.0))))
-  public var valueConv2: Conv2D<Float> = Conv2D<Float>(
-    filterShape: (4, 4, 32, 64),
-    strides: (2, 2),
-    filterInitializer: orthogonal(gain: Tensor<Float>(sqrt(2.0))))
-  public var valueConv3: Conv2D<Float> = Conv2D<Float>(
-    filterShape: (3, 3, 64, 64),
-    strides: (1, 1),
-    filterInitializer: orthogonal(gain: Tensor<Float>(sqrt(2.0))))
-  public var valueDenseHidden: Dense<Float> = Dense<Float>(
-    inputSize: 3136,
-    outputSize: 512,
-    weightInitializer: orthogonal(gain: Tensor<Float>(sqrt(2.0))))
-  public var valueDenseOutput: Dense<Float> = Dense<Float>(
+  public var denseValue: Dense<Float> = Dense<Float>(
     inputSize: 512,
     outputSize: 1,
     weightInitializer: orthogonal(gain: Tensor<Float>(1.0)))
@@ -69,19 +52,13 @@ struct ArcadeActorCritic: Module {
     let input = Tensor<Float>(input.flattenedBatch(outerDimCount: outerDimCount)) / 255.0
 
     // Policy Network.
-    let actionConv1 = relu(self.actionConv1(input))
-    let actionConv2 = relu(self.actionConv2(actionConv1))
-    let actionConv3 = relu(self.actionConv3(actionConv2)).reshaped(to: [-1, 3136])
-    let actionHidden = relu(actionDenseHidden(actionConv3))
-    let actionLogits = actionDenseOutput(actionHidden)
+    let conv1 = relu(self.conv1(input))
+    let conv2 = relu(self.conv2(conv1))
+    let conv3 = relu(self.conv3(conv2)).reshaped(to: [-1, 3136])
+    let hidden = relu(denseHidden(conv3))
+    let actionLogits = denseAction(hidden)
     let actionDistribution = Categorical<Int32>(logits: actionLogits)
-
-    // Value Network.
-    let valueConv1 = relu(self.valueConv1(input))
-    let valueConv2 = relu(self.valueConv2(valueConv1))
-    let valueConv3 = relu(self.valueConv3(valueConv2)).reshaped(to: [-1, 3136])
-    let valueHidden = relu(valueDenseHidden(valueConv3))
-    let value = valueDenseOutput(valueHidden)
+    let value = denseValue(hidde)
 
     return ActorCriticOutput(
       actionDistribution: actionDistribution.unflattenedBatch(outerDims: outerDims),
