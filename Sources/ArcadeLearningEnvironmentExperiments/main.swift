@@ -58,7 +58,7 @@ struct ArcadeActorCritic: Module {
     let hidden = relu(denseHidden(conv3))
     let actionLogits = denseAction(hidden)
     let actionDistribution = Categorical<Int32>(logits: actionLogits)
-    let value = denseValue(hidde)
+    let value = denseValue(hidden)
 
     return ActorCriticOutput(
       actionDistribution: actionDistribution.unflattenedBatch(outerDims: outerDims),
