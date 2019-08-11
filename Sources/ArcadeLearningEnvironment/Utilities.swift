@@ -15,6 +15,10 @@
 import Foundation
 import TensorFlow
 
+#if os(Linux)
+import FoundationNetworking
+#endif
+
 /// Creates an orthogonal matrix or tensor. 
 ///
 /// If the shape of the tensor to initialize is two-dimensional, it is initialized with an 
