@@ -19,6 +19,26 @@ import TensorFlow
 
 // _RuntimeConfig.useLazyTensor = true
 
+let logger = Logger(label: "Pong PPO")
+
+let batchSize = 6
+let emulators = (0..<batchSize).map { _ in ArcadeEmulator(game: .pong) }
+let arcadeEnvironment = ArcadeEnvironment(
+  using: emulators,
+  observationsType: .screen(height: 84, width: 84, format: .grayscale),
+  useMinimalActionSet: true,
+  episodicLives: true,
+  noOpReset: .stochastic(minCount: 0, maxCount: 30),
+  frameSkip: .constant(4),
+  frameStackCount: 4,
+  parallelizedBatchProcessing: true)
+let averageEpisodeReward = AverageEpisodeReward(for: arcadeEnvironment, bufferSize: 100)
+let environment = EnvironmentCallbackWrapper(
+  arcadeEnvironment,
+  callbacks: averageEpisodeReward.updater())
+
+logger.info("Number of valid actions: \(arcadeEnvironment.actionCount)")
+
 struct ArcadeActorCritic: Module {
   public var conv1: Conv2D<Float> = Conv2D<Float>(
     filterShape: (8, 8, 4, 32),
@@ -38,8 +58,8 @@ struct ArcadeActorCritic: Module {
     weightInitializer: orthogonal(gain: Tensor<Float>(sqrt(2.0))))
   public var denseAction: Dense<Float> = Dense<Float>(
     inputSize: 512,
-    outputSize: 4,
-    weightInitializer: orthogonal(gain: Tensor<Float>(0.01))) // TODO: Easy way to get the number of actions.
+    outputSize: arcadeEnvironment.actionCount,
+    weightInitializer: orthogonal(gain: Tensor<Float>(0.01)))
   public var denseValue: Dense<Float> = Dense<Float>(
     inputSize: 512,
     outputSize: 1,
@@ -66,42 +86,22 @@ struct ArcadeActorCritic: Module {
   }
 }
 
-let logger = Logger(label: "Breakout PPO")
-
-let batchSize = 6
-let emulators = (0..<batchSize).map { _ in ArcadeEmulator(game: .breakout) }
-let arcadeEnvironment = ArcadeEnvironment(
-  using: emulators,
-  observationsType: .screen(height: 84, width: 84, format: .grayscale),
-  useMinimalActionSet: true,
-  episodicLives: true,
-  noOpReset: .stochastic(minCount: 0, maxCount: 30),
-  frameSkip: .constant(4),
-  frameStackCount: 4,
-  parallelizedBatchProcessing: true)
-let averageEpisodeReward = AverageEpisodeReward(for: arcadeEnvironment, bufferSize: 100)
-let environment = EnvironmentCallbackWrapper(
-  arcadeEnvironment,
-  callbacks: averageEpisodeReward.updater())
-
-logger.info("Number of valid actions: \(arcadeEnvironment.actionCount)")
-
 let network = ArcadeActorCritic()
 var agent = PPOAgent1(
   for: environment,
   network: network,
-  optimizer: AMSGrad(for: network, learningRate: 2.5e-4),
-  learningRateSchedule: ExponentialLearningRateDecay(decayRate: 0.99, decayStepCount: 3),
+  optimizer: AMSGrad(for: network, learningRate: 1e-4),
+  learningRateSchedule: ExponentialLearningRateDecay(decayRate: 0.999, decayStepCount: 1),
   maxGradientNorm: 0.5,
   advantageFunction: GeneralizedAdvantageEstimation(discountFactor: 0.99, discountWeight: 0.95),
-  advantagesNormalizer: TensorNormalizer<Float>(streaming: true, alongAxes: 0, 1),
+  advantagesNormalizer: TensorNormalizer<Float>(streaming: false, alongAxes: 0, 1),
   useTDLambdaReturn: true,
   clip: PPOClip(epsilon: 0.1),
-  penalty: PPOPenalty(klCutoffFactor: 0.5),
-  valueEstimationLoss: PPOValueEstimationLoss(weight: 0.5, clipThreshold: nil),
+  penalty: nil,
+  valueEstimationLoss: PPOValueEstimationLoss(weight: 0.5, clipThreshold: 0.1),
   entropyRegularization: PPOEntropyRegularization(weight: 0.01),
-  iterationCountPerUpdate: 4)
-for step in 0..<6500 {
+  iterationCountPerUpdate: 1)
+for step in 0..<10000 {
   let loss = agent.update(
     using: environment,
     maxSteps: 128 * batchSize,
