@@ -87,8 +87,11 @@ let network = ArcadeActorCritic()
 var agent = PPOAgent1(
   for: environment,
   network: network,
-  optimizer: AMSGrad(for: network, learningRate: 1e-4),
-  learningRateSchedule: ExponentialLearningRateDecay(decayRate: 0.999, decayStepCount: 1),
+  optimizer: AMSGrad(for: network),
+  learningRate: ExponentiallyDecayedLearningRate(
+    baseLearningRate: FixedLearningRate(1e-4),
+    decayRate: 0.999,
+    decayStepCount: 1),
   maxGradientNorm: 0.5,
   advantageFunction: GeneralizedAdvantageEstimation(discountFactor: 0.99, discountWeight: 0.95),
   advantagesNormalizer: TensorNormalizer<Float>(streaming: false, alongAxes: 0, 1),
