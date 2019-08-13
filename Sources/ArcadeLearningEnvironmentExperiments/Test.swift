@@ -204,33 +204,4 @@ where
 
     return lastEpochLoss
   }
-
-  @inlinable
-  @discardableResult
-  public mutating func update(
-    using environment: Environment,
-    maxSteps: Int = Int.max,
-    maxEpisodes: Int = Int.max,
-    stepCallbacks: [(Environment, inout Trajectory<Observation, Action, Reward>) -> Void] = []
-  ) -> Float {
-    var trajectories = [Trajectory<Observation, Action, Reward>]()
-    var currentStep = environment.currentStep
-    var numSteps = 0
-    var numEpisodes = 0
-    while numSteps < maxSteps && numEpisodes < maxEpisodes {
-      let action = self.action(for: currentStep, mode: .probabilistic)
-      let nextStep = environment.step(taking: action)
-      var trajectory = Trajectory(
-        stepKind: nextStep.kind,
-        observation: currentStep.observation,
-        action: action,
-        reward: nextStep.reward)
-      trajectories.append(trajectory)
-      stepCallbacks.forEach { $0(environment, &trajectory) }
-      numSteps += Int((1 - Tensor<Int32>(nextStep.kind.isLast())).sum().scalarized())
-      numEpisodes += Int(Tensor<Int32>(nextStep.kind.isLast()).sum().scalarized())
-      currentStep = nextStep
-    }
-    return update(using: Trajectory<Observation, Action, Reward>.stack(trajectories))
-  }
 }

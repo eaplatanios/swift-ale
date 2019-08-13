@@ -26,7 +26,7 @@ public enum ArcadeObservationsType {
 }
 
 /// Atari game environment.
-public final class ArcadeEnvironment: RenderableEnvironment {
+public struct ArcadeEnvironment: RenderableEnvironment {
   /// Batch size of this environment.
   public let batchSize: Int
 
@@ -75,8 +75,10 @@ public final class ArcadeEnvironment: RenderableEnvironment {
 
   /// Current environment step (i.e., result of the last call to `ArcadeEnvironment.step()`).
   @inlinable public var currentStep: Step<Tensor<UInt8>, Tensor<Float>> {
-    if step == nil { step = reset() }
-    return step!
+    mutating get {
+      if step == nil { step = reset() }
+      return step!
+    }
   }
 
   public init(
@@ -164,7 +166,7 @@ public final class ArcadeEnvironment: RenderableEnvironment {
   /// the performed step.
   @inlinable
   @discardableResult
-  public func step(taking action: Tensor<Int32>) -> Step<Tensor<UInt8>, Tensor<Float>> {
+  public mutating func step(taking action: Tensor<Int32>) -> Step<Tensor<UInt8>, Tensor<Float>> {
     let actions = action.unstacked()
 
     // Check if we need to use the parallelized version.
@@ -187,7 +189,7 @@ public final class ArcadeEnvironment: RenderableEnvironment {
   /// Performs a step in this environment for the specified batch index, using the provided action,
   /// and returns information about the performed step.
   @inlinable
-  internal func step(
+  internal mutating func step(
     taking action: Tensor<Int32>,
     batchIndex: Int
   ) -> Step<Tensor<UInt8>, Tensor<Float>> {
@@ -224,7 +226,7 @@ public final class ArcadeEnvironment: RenderableEnvironment {
   /// Resets this environment and returns the first step.
   @inlinable
   @discardableResult
-  public func reset() -> Step<Tensor<UInt8>, Tensor<Float>> {
+  public mutating func reset() -> Step<Tensor<UInt8>, Tensor<Float>> {
     step = Step<Tensor<UInt8>, Tensor<Float>>.stack((0..<batchSize).map { reset(batchIndex: $0) })
     return step!
   }
@@ -232,7 +234,7 @@ public final class ArcadeEnvironment: RenderableEnvironment {
   /// Resets this environment for the specified batch index and returns the first step of the
   /// resetted environment for that batch index.
   @inlinable
-  internal func reset(batchIndex: Int) -> Step<Tensor<UInt8>, Tensor<Float>> {
+  internal mutating func reset(batchIndex: Int) -> Step<Tensor<UInt8>, Tensor<Float>> {
     emulators[batchIndex].resetGame()
     for _ in 0..<noOpReset.count(rng: &rngs[batchIndex]) {
       emulators[batchIndex].act(using: .noOp)
@@ -264,7 +266,7 @@ public final class ArcadeEnvironment: RenderableEnvironment {
 
   /// Renders the current state of this environment.
   @inlinable
-  public func render() throws {
+  public mutating func render() throws {
     if renderer == nil { renderer = ImageRenderer() }
     // TODO: Better support batchSize > 1.
     try renderer!.render(emulators[0].screen(format: .rgb))
@@ -272,7 +274,7 @@ public final class ArcadeEnvironment: RenderableEnvironment {
 
   /// Returns the current obervation from the emulator corresponding to `batchIndex`.
   @inlinable
-  internal func currentObservation(batchIndex: Int) -> Tensor<UInt8> {
+  internal mutating func currentObservation(batchIndex: Int) -> Tensor<UInt8> {
     let emulator = dispatchQueue.sync { emulators[batchIndex] }
     var frame: ShapedArray<UInt8>
     switch observationsType {

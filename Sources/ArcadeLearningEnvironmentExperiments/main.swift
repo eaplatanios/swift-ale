@@ -19,11 +19,11 @@ import TensorFlow
 
 // _RuntimeConfig.useLazyTensor = true
 
-let logger = Logger(label: "Pong PPO")
+let logger = Logger(label: "Breakout PPO")
 
 let batchSize = 6
-let emulators = (0..<batchSize).map { _ in ArcadeEmulator(game: .pong) }
-let arcadeEnvironment = ArcadeEnvironment(
+let emulators = (0..<batchSize).map { _ in ArcadeEmulator(game: .breakout) }
+var environment = ArcadeEnvironment(
   using: emulators,
   observationsType: .screen(height: 84, width: 84, format: .grayscale),
   useMinimalActionSet: true,
@@ -32,12 +32,9 @@ let arcadeEnvironment = ArcadeEnvironment(
   frameSkip: .constant(4),
   frameStackCount: 4,
   parallelizedBatchProcessing: true)
-let averageEpisodeReward = AverageEpisodeReward(for: arcadeEnvironment, bufferSize: 100)
-let environment = EnvironmentCallbackWrapper(
-  arcadeEnvironment,
-  callbacks: averageEpisodeReward.updater())
+var averageEpisodeReward = AverageEpisodeReward(for: environment, bufferSize: 100)
 
-logger.info("Number of valid actions: \(arcadeEnvironment.actionCount)")
+logger.info("Number of valid actions: \(environment.actionCount)")
 
 struct ArcadeActorCritic: Module {
   public var conv1: Conv2D<Float> = Conv2D<Float>(
@@ -58,7 +55,7 @@ struct ArcadeActorCritic: Module {
     weightInitializer: orthogonal(gain: Tensor<Float>(sqrt(2.0))))
   public var denseAction: Dense<Float> = Dense<Float>(
     inputSize: 512,
-    outputSize: arcadeEnvironment.actionCount,
+    outputSize: environment.actionCount,
     weightInitializer: orthogonal(gain: Tensor<Float>(0.01)))
   public var denseValue: Dense<Float> = Dense<Float>(
     inputSize: 512,
@@ -102,12 +99,13 @@ var agent = PPOAgent1(
   entropyRegularization: PPOEntropyRegularization(weight: 0.01),
   iterationCountPerUpdate: 1)
 for step in 0..<10000 {
-  let loss = agent.update(
-    using: environment,
+  let loss = try! agent.update(
+    using: &environment,
     maxSteps: 128 * batchSize,
     maxEpisodes: 128 * batchSize,
-    stepCallbacks: [{ (environment, trajectory) in
-      // if step > 0 { try! environment.render() }
+    callbacks: [{ (environment, trajectory) in
+      averageEpisodeReward.update(using: trajectory)
+      if step > 0 { try! environment.render() }
     }])
   if step % 1 == 0 {
     logger.info("Step \(step) | Loss: \(loss) | Average Episode Reward: \(averageEpisodeReward.value())")
