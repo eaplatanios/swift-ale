@@ -527,7 +527,7 @@ extension ArcadeEmulator {
     ///   `gameROMsPath`.
     public func romPath(in gameROMsPath: URL) throws -> URL {
       let fileURL = gameROMsPath.appendingPathComponent("\(rawValue).bin")
-      let atariPyGitHub = "https://github.com/openai/atari-py/blob/master/atari_py/atari_roms"
+      let atariPyGitHub = "https://github.com/openai/atari-py/blob/9226727aaa76e8498605c665ab04ce27b57dd9d2/atari_py/atari_roms"
       let gitHubURL = URL(string: "\(atariPyGitHub)/\(rawValue).bin?raw=true")!
       try maybeDownload(from: gitHubURL, to: fileURL)
       return fileURL

@@ -19,10 +19,10 @@ import TensorFlow
 
 // _RuntimeConfig.useLazyTensor = true
 
-let logger = Logger(label: "Breakout PPO")
+let logger = Logger(label: "Carnival PPO")
 
-let batchSize = 6
-let emulators = (0..<batchSize).map { _ in ArcadeEmulator(game: .breakout) }
+let batchSize = 16
+let emulators = (0..<batchSize).map { _ in ArcadeEmulator(game: .carnival) }
 var environment = ArcadeEnvironment(
   using: emulators,
   observationsType: .screen(height: 84, width: 84, format: .grayscale),
@@ -32,7 +32,9 @@ var environment = ArcadeEnvironment(
   frameSkip: .constant(4),
   frameStackCount: 4,
   parallelizedBatchProcessing: true)
-var averageEpisodeReward = AverageEpisodeReward(for: environment, bufferSize: 100)
+var averageEpisodeReward = AverageEpisodeReward<ArcadeEnvironment, Empty>(
+  for: environment,
+  bufferSize: 100)
 
 logger.info("Number of valid actions: \(environment.actionCount)")
 
@@ -63,7 +65,9 @@ struct ArcadeActorCritic: Module {
     weightInitializer: orthogonal(gain: Tensor<Float>(1.0)))
 
   @differentiable
-  public func callAsFunction(_ input: Tensor<UInt8>) -> ActorCriticOutput<Categorical<Int32>> {
+  public func callAsFunction(
+    _ input: Tensor<UInt8>
+  ) -> StatelessActorCriticOutput<Categorical<Int32>> {
     let outerDimCount = input.rank - 3
     let outerDims = [Int](input.shape.dimensions[0..<outerDimCount])
     let input = Tensor<Float>(input.flattenedBatch(outerDimCount: outerDimCount)) / 255.0
@@ -77,19 +81,19 @@ struct ArcadeActorCritic: Module {
     let actionDistribution = Categorical<Int32>(logits: actionLogits)
     let value = denseValue(hidden)
 
-    return ActorCriticOutput(
+    return StatelessActorCriticOutput(
       actionDistribution: actionDistribution.unflattenedBatch(outerDims: outerDims),
       value: value.unflattenedBatch(outerDims: outerDims).squeezingShape(at: -1))
   }
 }
 
 let network = ArcadeActorCritic()
-var agent = PPOAgent1(
+var agent = PPOAgent(
   for: environment,
   network: network,
-  optimizer: AMSGrad(for: network),
+  optimizer: { AMSGrad(for: $0) },
   learningRate: ExponentiallyDecayedLearningRate(
-    baseLearningRate: FixedLearningRate(1e-4),
+    baseLearningRate: FixedLearningRate(1e-3),
     decayRate: 0.999,
     decayStepCount: 1),
   maxGradientNorm: 0.5,
@@ -100,7 +104,7 @@ var agent = PPOAgent1(
   penalty: nil,
   valueEstimationLoss: PPOValueEstimationLoss(weight: 0.5, clipThreshold: 0.1),
   entropyRegularization: PPOEntropyRegularization(weight: 0.01),
-  iterationCountPerUpdate: 1)
+  iterationCountPerUpdate: 4)
 for step in 0..<10000 {
   let loss = try! agent.update(
     using: &environment,
